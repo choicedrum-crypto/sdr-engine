@@ -1,0 +1,16 @@
+{
+  "_comment": "Past + present TCIA brokers. Module 3 cross-references deal notes and engagement bodies against this list to find named-broker relationship anchors. First hit wins. TODO(daniel): populate with actual roster before launch.",
+  "brokers": [
+    {
+      "name": "Daniel Bradley",
+      "aliases": ["Daniel", "Dan Bradley"],
+      "status": "active",
+      "years": "2024-present"
+    }
+  ],
+  "_TODO": [
+    "Add past brokers who serviced existing pipeline deals — their names appearing in old deal notes is the strongest relationship anchor signal.",
+    "Include common nicknames in 'aliases' array so the matcher catches 'Tom' as well as 'Thomas O'Connell'.",
+    "Tag with 'status: active | departed | retired' so departed brokers can still be referenced ('your relationship with X who used to work with us')."
+  ]
+}
