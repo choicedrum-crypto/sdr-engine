@@ -1,22 +1,25 @@
 """SDR Engine — Review UI server.
 
-Single-file Flask app, ~200 lines target. Email-only card layout per T3=A:
-the deal note and call script auto-post to HubSpot (Module 7); the SDR
-reviews/edits only the email here, and adjusts the other artifacts in
-HubSpot directly while working the deal.
+Single-file Flask app. Email-only card layout per T3=A: deal note and call
+script auto-post to HubSpot via Module 7; the SDR reviews/edits only the
+email here and adjusts the other artifacts in HubSpot directly.
 
-Bound to 127.0.0.1:5679 only (A5). Remote access via Cloudflare Tunnel
-at https://sdr.tradecredit.agency — Cloudflare Access handles auth at
-the edge; this server doesn't need its own login flow.
+Bound to 127.0.0.1:5679 only (A5). Remote access via Cloudflare Tunnel at
+https://sdr.tradecredit.agency — Cloudflare Access handles auth at the
+edge; this server doesn't need its own login flow.
 
 Routes:
-  GET  /queue                    — next pending card
-  POST /queue/{id}/send          — send (auto-detects dirty edit, stores diff)
-  POST /queue/{id}/skip          — 30-day cooldown
-  POST /queue/{id}/retry-note    — for send_partial: retry HubSpot note creation
-  POST /queue/{id}/retry-task    — for send_partial: retry HubSpot task creation
-  POST /queue/force              — manual injection bypassing dedupe/cap
-  GET  /health                   — JSON status of LLM, HubSpot, SQLite, last_run
+  GET  /queue                    — next card (state-aware render)
+  POST /queue/<id>/send          — call Module 7; auto-detect dirty edit
+  POST /queue/<id>/skip          — 30-day cooldown
+  POST /queue/<id>/retry-note    — fill missing note on send_partial row
+  POST /queue/<id>/retry-task    — fill missing task on send_partial row
+  POST /queue/force              — 501 until Modules 1 + 3 land
+  GET  /health                   — JSON: LLM/HubSpot/SQLite/last_run
+
+Configurable via the function `create_app()` so tests can pass an
+isolated SQLite path. Production entry point reads env vars and starts
+the dev server at 127.0.0.1:5679.
 """
 from __future__ import annotations
 
@@ -25,136 +28,286 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
-from flask import Flask, abort, jsonify
+from flask import Flask, abort, g, jsonify, redirect, render_template, request, url_for
+
+from sdr_engine.clients.hubspot import HubSpotClient
+from sdr_engine.queue_ops import (
+    compute_edit_diff,
+    force_enqueue_not_yet_supported,
+    get_by_id,
+    get_last_run,
+    get_next_card,
+    is_scheduler_running_now,
+    mark_sent,
+    mark_skipped,
+    update_partial_ids,
+)
+from sdr_engine.send import send_artifacts
 
 load_dotenv()
 
-# ─── Config ────────────────────────────────────────────────────
-SQLITE_PATH = Path(os.path.expanduser(os.getenv("SQLITE_PATH", "~/.sdr-engine/queue.db")))
-HOST = os.getenv("REVIEW_UI_HOST", "127.0.0.1")
-PORT = int(os.getenv("REVIEW_UI_PORT", "5679"))
-LLM_ENDPOINT = os.getenv("LLM_ENDPOINT", "http://127.0.0.1:4000/v1/chat/completions")
-HUBSPOT_API_KEY = os.getenv("HUBSPOT_API_KEY", "")
-
-# Card is considered "stale" if loaded >2h ago (per A8 amendment).
-# Surface staleness banner if last successful scheduler run >25h ago.
-STALE_AFTER_SECONDS = 2 * 60 * 60
+# Surface staleness banner if last successful scheduler run is older than this.
 STALE_RUN_HOURS = 25
 
-app = Flask(__name__, template_folder="templates", static_folder="static")
 
+def create_app(
+    sqlite_path: Path | None = None,
+    hubspot_api_key: str | None = None,
+    hubspot_owner_id: str | None = None,
+    hubspot_base_url: str = "https://api.hubapi.com",
+    llm_endpoint: str | None = None,
+) -> Flask:
+    """Build the Flask app with explicit configuration.
 
-# ─── DB helpers ────────────────────────────────────────────────
-def get_db() -> sqlite3.Connection:
-    """Open a connection with WAL + busy_timeout already applied to the DB."""
-    conn = sqlite3.connect(SQLITE_PATH, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-# ─── Routes ────────────────────────────────────────────────────
-@app.get("/health")
-def health():
-    """Health check for post-deploy verification + UI top-of-page indicator (A7)."""
-    status = {
-        "llm": _probe_llm(),
-        "hubspot": _probe_hubspot(),
-        "sqlite": _probe_sqlite(),
-        "last_run": None,
-        "last_run_age_seconds": None,
-    }
-
-    try:
-        with get_db() as db:
-            row = db.execute(
-                "SELECT started_at, status FROM runs WHERE status = 'success' "
-                "ORDER BY started_at DESC LIMIT 1"
-            ).fetchone()
-        if row:
-            status["last_run"] = row["started_at"]
-            # Best-effort age calc; SQLite's strftime('%s') returns seconds since epoch
-            with get_db() as db:
-                age = db.execute(
-                    "SELECT (strftime('%s','now') - strftime('%s', ?)) AS age", (row["started_at"],)
-                ).fetchone()
-                status["last_run_age_seconds"] = age["age"] if age else None
-    except sqlite3.Error:
-        pass  # already reflected in sqlite probe
-
-    overall = "ok" if all(v == "ok" for k, v in status.items() if k in ("llm", "hubspot", "sqlite")) else "degraded"
-    status["overall"] = overall
-    return jsonify(status)
-
-
-@app.get("/queue")
-def queue_view():
-    """Render the next pending card. TODO: implement state-aware rendering."""
-    # TODO(module-6): implement state machine: loading → warming → caught_up_done → card → send_partial → stale
-    abort(501, "Module 6 UI not yet implemented")
-
-
-@app.post("/queue/<int:queue_id>/send")
-def queue_send(queue_id: int):
-    """Send the email. Auto-detect dirty edit by comparing posted body to draft_body."""
-    # TODO(module-6): invoke Module 7 HubSpot writes; store edit_diff if dirty
-    abort(501, "Module 7 send path not yet implemented")
-
-
-@app.post("/queue/<int:queue_id>/skip")
-def queue_skip(queue_id: int):
-    """Skip — 30-day cooldown enforced by Module 1."""
-    # TODO(module-6): mark skipped, actioned_at = now
-    abort(501)
-
-
-@app.post("/queue/<int:queue_id>/retry-note")
-def queue_retry_note(queue_id: int):
-    """Retry HubSpot note creation only — for send_partial state."""
-    # TODO(module-7): re-call note engagement endpoint
-    abort(501)
-
-
-@app.post("/queue/<int:queue_id>/retry-task")
-def queue_retry_task(queue_id: int):
-    """Retry HubSpot phone-task creation only — for send_partial state."""
-    # TODO(module-7): re-call task creation
-    abort(501)
-
-
-@app.post("/queue/force")
-def queue_force():
-    """Manual injection bypassing dedupe + rate cap.
-
-    Compliance filter (opt-out, bounced, quarantined) is NOT bypassed —
-    legal hard requirement.
+    Defaults come from environment so production just runs `python ui/server.py`;
+    tests construct an isolated app pointing at a tmp SQLite file via this factory.
     """
-    # TODO(module-6): accept {deal_id}, validate in HubSpot, run Modules 2-5 inline
-    abort(501)
+    app = Flask(__name__, template_folder="templates", static_folder="static")
+    app.config["SQLITE_PATH"] = sqlite_path or Path(
+        os.path.expanduser(os.getenv("SQLITE_PATH", "~/.sdr-engine/queue.db"))
+    )
+    app.config["HUBSPOT_API_KEY"] = hubspot_api_key or os.getenv("HUBSPOT_API_KEY", "")
+    app.config["HUBSPOT_OWNER_ID"] = hubspot_owner_id or os.getenv("HUBSPOT_OWNER_ID", "")
+    app.config["HUBSPOT_BASE_URL"] = hubspot_base_url
+    app.config["LLM_ENDPOINT"] = llm_endpoint or os.getenv(
+        "LLM_ENDPOINT", "http://127.0.0.1:4000/v1/chat/completions"
+    )
+
+    # ─── DB connection lifecycle (per-request) ─────────────────────
+    def _get_db() -> sqlite3.Connection:
+        if "db" not in g:
+            conn = sqlite3.connect(app.config["SQLITE_PATH"], isolation_level=None)
+            g.db = conn
+        return g.db
+
+    @app.teardown_appcontext
+    def _close_db(_exc) -> None:
+        conn = g.pop("db", None)
+        if conn is not None:
+            conn.close()
+
+    def _hubspot_client() -> HubSpotClient:
+        return HubSpotClient(
+            api_key=app.config["HUBSPOT_API_KEY"],
+            base_url=app.config["HUBSPOT_BASE_URL"],
+        )
+
+    # ─── GET /queue — state-aware card render ─────────────────────
+    @app.get("/queue")
+    def queue_view():
+        db = _get_db()
+        last_run = get_last_run(db)
+        card = get_next_card(db)
+
+        # Staleness check: was the last run successful within 25h?
+        scheduler_stale = (
+            last_run.age_seconds is not None
+            and last_run.age_seconds > STALE_RUN_HOURS * 3600
+        ) or last_run.started_at is None
+
+        if card is None:
+            # No pending cards. Distinguish caught_up_done from warming.
+            if is_scheduler_running_now(db):
+                state = "warming"
+            else:
+                state = "caught_up_done"
+            return render_template(
+                "queue.html",
+                state=state,
+                card=None,
+                last_run=last_run,
+                scheduler_stale=scheduler_stale,
+            )
+
+        # We have a card. State depends on its status.
+        state = "send_partial" if card.status == "send_partial" else "card"
+        # LLM-failure banner: draft_body starts with [LLM format failure
+        llm_failed = card.draft_body.startswith("[LLM format failure")
+        return render_template(
+            "queue.html",
+            state=state,
+            card=card,
+            last_run=last_run,
+            scheduler_stale=scheduler_stale,
+            llm_failed=llm_failed,
+        )
+
+    # ─── POST /queue/<id>/send ────────────────────────────────────
+    @app.post("/queue/<int:queue_id>/send")
+    def queue_send(queue_id: int):
+        db = _get_db()
+        card = get_by_id(db, queue_id)
+        if card is None:
+            abort(404, f"queue row {queue_id} not found")
+        if card.status not in ("pending", "send_partial"):
+            abort(409, f"row {queue_id} is {card.status}; cannot send")
+
+        # Posted form fields:
+        #   subject (chosen subject — may be the alt or freeform)
+        #   body    (may be edited; auto-diff if differs from draft_body)
+        chosen_subject = request.form.get("subject", card.draft_subject)
+        posted_body = request.form.get("body", card.draft_body)
+        edit_diff = compute_edit_diff(card.draft_body, posted_body)
+
+        result = send_artifacts(
+            artifacts=card.artifacts_for_send(),
+            chosen_subject=chosen_subject,
+            body=posted_body,
+            owner_id=app.config["HUBSPOT_OWNER_ID"],
+            contact_id=card.contact_id,
+            deal_id=card.deal_id,
+            company_name=card.company_name,
+            hubspot=_hubspot_client(),
+            existing_engagement_id=card.hubspot_engagement_id,
+            existing_note_id=card.hubspot_note_id,
+            existing_task_id=card.hubspot_task_id,
+        )
+
+        if result.status == "failed":
+            # Email never went out — leave the row pending so user can retry.
+            return jsonify({
+                "status": "failed",
+                "errors": result.errors,
+            }), 502
+
+        mark_sent(
+            db,
+            queue_id,
+            engagement_id=result.engagement_id,
+            note_id=result.note_id,
+            task_id=result.task_id,
+            edit_diff=edit_diff,
+        )
+
+        if request.headers.get("Accept") == "application/json" or request.is_json:
+            return jsonify({
+                "status": result.status,
+                "engagement_id": result.engagement_id,
+                "note_id": result.note_id,
+                "task_id": result.task_id,
+                "errors": result.errors,
+            })
+        return redirect(url_for("queue_view"))
+
+    # ─── POST /queue/<id>/skip ────────────────────────────────────
+    @app.post("/queue/<int:queue_id>/skip")
+    def queue_skip(queue_id: int):
+        db = _get_db()
+        card = get_by_id(db, queue_id)
+        if card is None:
+            abort(404, f"queue row {queue_id} not found")
+        if card.status not in ("pending", "send_partial"):
+            abort(409, f"row {queue_id} is {card.status}; cannot skip")
+        mark_skipped(db, queue_id)
+        if request.headers.get("Accept") == "application/json" or request.is_json:
+            return jsonify({"status": "skipped"})
+        return redirect(url_for("queue_view"))
+
+    # ─── POST /queue/<id>/retry-note ──────────────────────────────
+    @app.post("/queue/<int:queue_id>/retry-note")
+    def queue_retry_note(queue_id: int):
+        return _retry_step(queue_id, missing="note")
+
+    # ─── POST /queue/<id>/retry-task ──────────────────────────────
+    @app.post("/queue/<int:queue_id>/retry-task")
+    def queue_retry_task(queue_id: int):
+        return _retry_step(queue_id, missing="task")
+
+    def _retry_step(queue_id: int, *, missing: str):
+        """Shared helper for the two retry routes.
+
+        Passes the existing engagement_id (and the OTHER completed id) back
+        into send_artifacts, which then only fires the still-missing step.
+        """
+        db = _get_db()
+        card = get_by_id(db, queue_id)
+        if card is None:
+            abort(404, f"queue row {queue_id} not found")
+        if card.status != "send_partial":
+            abort(409, f"row {queue_id} is {card.status}; retry only valid for send_partial")
+        if missing == "note" and card.hubspot_note_id:
+            abort(409, "note already exists; nothing to retry")
+        if missing == "task" and card.hubspot_task_id:
+            abort(409, "task already exists; nothing to retry")
+
+        result = send_artifacts(
+            artifacts=card.artifacts_for_send(),
+            chosen_subject=card.draft_subject,
+            body=card.draft_body,
+            owner_id=app.config["HUBSPOT_OWNER_ID"],
+            contact_id=card.contact_id,
+            deal_id=card.deal_id,
+            company_name=card.company_name,
+            hubspot=_hubspot_client(),
+            existing_engagement_id=card.hubspot_engagement_id,
+            existing_note_id=card.hubspot_note_id,
+            existing_task_id=card.hubspot_task_id,
+        )
+
+        update_partial_ids(db, queue_id, note_id=result.note_id, task_id=result.task_id)
+
+        if request.headers.get("Accept") == "application/json" or request.is_json:
+            return jsonify({
+                "status": result.status,
+                "note_id": result.note_id,
+                "task_id": result.task_id,
+                "errors": result.errors,
+            })
+        return redirect(url_for("queue_view"))
+
+    # ─── POST /queue/force — stub until Modules 1 + 3 ─────────────
+    @app.post("/queue/force")
+    def queue_force():
+        result = force_enqueue_not_yet_supported()
+        return jsonify({
+            "error": result.error,
+            "needs_modules": result.needs,
+        }), 501
+
+    # ─── GET /health ──────────────────────────────────────────────
+    @app.get("/health")
+    def health():
+        status = {
+            "llm": _probe_llm(app.config["LLM_ENDPOINT"]),
+            "hubspot": _probe_hubspot(app.config["HUBSPOT_API_KEY"]),
+            "sqlite": _probe_sqlite(app.config["SQLITE_PATH"]),
+            "last_run": None,
+            "last_run_age_seconds": None,
+        }
+        try:
+            last_run = get_last_run(_get_db())
+            status["last_run"] = last_run.started_at
+            status["last_run_age_seconds"] = last_run.age_seconds
+        except sqlite3.Error:
+            pass
+        overall = "ok" if all(
+            status[k] == "ok" for k in ("llm", "hubspot", "sqlite")
+        ) else "degraded"
+        status["overall"] = overall
+        return jsonify(status)
+
+    return app
 
 
-# ─── Probes ────────────────────────────────────────────────────
-def _probe_llm() -> str:
-    """Return 'ok' if the LiteLLM endpoint responds, else 'down' or 'unreachable'."""
+# ─── Probes (module-level so tests can patch) ──────────────────────
+def _probe_llm(endpoint: str) -> str:
     try:
-        import requests
-        # LiteLLM exposes /health; if not, /v1/models is a cheap GET
-        base = LLM_ENDPOINT.rsplit("/v1/", 1)[0]
+        base = endpoint.rsplit("/v1/", 1)[0]
         r = requests.get(f"{base}/health", timeout=3)
         return "ok" if r.status_code < 500 else "down"
-    except Exception:  # noqa: BLE001 — health probe should never raise
+    except Exception:  # noqa: BLE001 — health probe never raises
         return "unreachable"
 
 
-def _probe_hubspot() -> str:
-    """Return 'ok' if HubSpot API token works, else 'unauthorized' or 'down'."""
-    if not HUBSPOT_API_KEY:
+def _probe_hubspot(api_key: str) -> str:
+    if not api_key:
         return "unconfigured"
     try:
-        import requests
         r = requests.get(
             "https://api.hubapi.com/account-info/v3/details",
-            headers={"Authorization": f"Bearer {HUBSPOT_API_KEY}"},
+            headers={"Authorization": f"Bearer {api_key}"},
             timeout=5,
         )
         if r.status_code == 200:
@@ -162,34 +315,33 @@ def _probe_hubspot() -> str:
         if r.status_code == 401:
             return "unauthorized"
         return "down"
-    except Exception:
+    except Exception:  # noqa: BLE001
         return "unreachable"
 
 
-def _probe_sqlite() -> str:
-    """Return 'ok' if the queue DB is readable, else 'missing' or 'locked'."""
-    if not SQLITE_PATH.exists():
+def _probe_sqlite(path: Path) -> str:
+    if not Path(path).exists():
         return "missing"
     try:
-        with get_db() as db:
-            db.execute("SELECT 1").fetchone()
+        conn = sqlite3.connect(path)
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
         return "ok"
     except sqlite3.OperationalError as exc:
         return "locked" if "locked" in str(exc).lower() else "error"
-    except Exception:
+    except Exception:  # noqa: BLE001
         return "error"
 
 
-# ─── Entry point ───────────────────────────────────────────────
+# ─── Entry point ───────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Refuse to bind to 0.0.0.0 unless explicitly opted-in. The Cloudflare
-    # Tunnel reaches us locally; LAN exposure is a separate decision.
-    if HOST not in {"127.0.0.1", "localhost"} and os.getenv("ALLOW_LAN_BIND") != "true":
+    host = os.getenv("REVIEW_UI_HOST", "127.0.0.1")
+    port = int(os.getenv("REVIEW_UI_PORT", "5679"))
+    if host not in {"127.0.0.1", "localhost"} and os.getenv("ALLOW_LAN_BIND") != "true":
         print(
-            f"REFUSING to bind to {HOST}. Use 127.0.0.1 (default) and reach "
-            "the UI via Cloudflare Tunnel, OR set ALLOW_LAN_BIND=true to override.",
+            f"REFUSING to bind to {host}. Use 127.0.0.1 (default) and reach the UI via "
+            "Cloudflare Tunnel, OR set ALLOW_LAN_BIND=true to override.",
             file=sys.stderr,
         )
         sys.exit(1)
-
-    app.run(host=HOST, port=PORT, debug=False)
+    create_app().run(host=host, port=port, debug=False)
