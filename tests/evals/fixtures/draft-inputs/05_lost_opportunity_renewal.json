@@ -1,0 +1,23 @@
+{
+  "_label": "Lost Opportunity — renewal trigger, prior quote relationship",
+  "_variant": "structured_re_engagement",
+  "_precedence_check": "renewal mention can be most direct: 'we noticed your renewal window may be approaching'",
+  "prospect_type": "lost_opportunity",
+  "send_reason": "renewal",
+  "company_name": "Tideline Industrial",
+  "company_acronym": "Tideline",
+  "company_industry": "Industrial Equipment",
+  "contact_first_name": "Patricia",
+  "contact_last_name": "O'Brien",
+  "contact_source": "existing",
+  "quote_amount": "640000",
+  "product_line": "Trade Credit Insurance (Atradius)",
+  "quote_date_human": "April 2024",
+  "renewal_date_or_null": "2026-07-12",
+  "policy_excerpt_or_null": "2024-04 Atradius quote — Tideline declined citing rate structure. Coverage gap on top-5 buyers flagged at the time.",
+  "hook_text": "",
+  "hook_source": "none",
+  "anchor_type": "prior_work",
+  "anchor_name": "",
+  "anchor_context": "TCIA quoted Atradius for Tideline in April 2024 — Patricia was the decision-maker on the original conversation."
+}

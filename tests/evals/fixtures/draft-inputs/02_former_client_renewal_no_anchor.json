@@ -1,0 +1,23 @@
+{
+  "_label": "Former Client — renewal trigger, no anchor (drop relationship paragraph)",
+  "_variant": "structured_re_engagement",
+  "_expected_paragraphs": 3,
+  "prospect_type": "former_client",
+  "send_reason": "renewal",
+  "company_name": "Pinnacle Distributors",
+  "company_acronym": "",
+  "company_industry": "Industrial Distribution",
+  "contact_first_name": "Michael",
+  "contact_last_name": "Reyes",
+  "contact_source": "existing",
+  "quote_amount": "1200000",
+  "product_line": "Trade Credit Insurance",
+  "quote_date_human": "September 2023",
+  "renewal_date_or_null": "2026-08-15",
+  "policy_excerpt_or_null": null,
+  "hook_text": "",
+  "hook_source": "none",
+  "anchor_type": "none",
+  "anchor_name": "",
+  "anchor_context": null
+}

@@ -1,0 +1,22 @@
+{
+  "_label": "COI Referral — warm intro via attorney, no renewal context",
+  "_variant": "warm_direct_ask",
+  "prospect_type": "coi_referral",
+  "send_reason": "round-robin",
+  "company_name": "Cascade Building Supply",
+  "company_acronym": "Cascade",
+  "company_industry": "Construction Materials Distribution",
+  "contact_first_name": "Robert",
+  "contact_last_name": "Kim",
+  "contact_source": "existing",
+  "quote_amount": "",
+  "product_line": "",
+  "quote_date_human": "",
+  "renewal_date_or_null": null,
+  "policy_excerpt_or_null": null,
+  "hook_text": "",
+  "hook_source": "none",
+  "anchor_type": "agency_contact",
+  "anchor_name": "David Park",
+  "anchor_context": "David Park (Stevens & Park Tax Advisory) mentioned Robert is open to a conversation about credit insurance — they discussed it over coffee last week."
+}

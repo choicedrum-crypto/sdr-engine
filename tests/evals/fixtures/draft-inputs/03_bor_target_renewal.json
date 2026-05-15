@@ -1,0 +1,23 @@
+{
+  "_label": "BOR Target — renewal trigger, ZoomInfo-enriched contact (no prior history)",
+  "_variant": "structured_re_engagement",
+  "_precedence_check": "renewal mention must be 'when your term comes up for review' — NOT 'before your renewal'",
+  "prospect_type": "bor_target",
+  "send_reason": "renewal",
+  "company_name": "Meridian Wholesale Foods",
+  "company_acronym": "Meridian",
+  "company_industry": "Food Wholesale",
+  "contact_first_name": "Jennifer",
+  "contact_last_name": "Walsh",
+  "contact_source": "zoominfo_enriched",
+  "quote_amount": "",
+  "product_line": "",
+  "quote_date_human": "",
+  "renewal_date_or_null": "2026-09-30",
+  "policy_excerpt_or_null": null,
+  "hook_text": "CFO transition — Jennifer Walsh hired August 2026 from Sysco Corporate",
+  "hook_source": "leadership_change",
+  "anchor_type": "none",
+  "anchor_name": "",
+  "anchor_context": null
+}
