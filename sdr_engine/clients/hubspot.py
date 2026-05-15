@@ -1,8 +1,5 @@
-"""HubSpot client — contact create + associate + delete (rollback).
-
-Only the operations Module 2.5 needs. Module 7 (HubSpot writes for email +
-deal note + phone task) will live alongside this — a future PR adds the
-corresponding methods on the same client.
+"""HubSpot client — covers Module 2.5 (contact CRUD + association) and
+Module 7 (email engagement, deal note, phone task creation).
 
 All requests target the v3 CRM endpoints. Bearer-token auth.
 """
@@ -145,3 +142,135 @@ class HubSpotClient:
             return
         if resp.status_code >= 400:
             raise HubSpotError(resp.status_code, resp.text, operation="delete_contact")
+
+    # ─── Module 7 — engagement / note / task writes ────────────────
+    def create_email_engagement(
+        self,
+        *,
+        subject: str,
+        body: str,
+        owner_id: str,
+        contact_id: str,
+        deal_id: str,
+        timestamp_ms: int,
+    ) -> str:
+        """POST /crm/v3/objects/emails — log the email send under the SDR's
+        owner identity. Returns the engagement_id.
+
+        Per Open Q #7's resolution: setting hubspot_owner_id correctly is what
+        renders 'sent on behalf of Daniel' in the prospect's inbox rather than
+        a noreply@hubspot.com fallback. Verify via the pre-launch sender test
+        in docs/ARCHITECTURE.md.
+        """
+        body_doc = {
+            "properties": {
+                "hs_email_subject": subject,
+                "hs_email_text": body,
+                "hs_email_direction": "EMAIL",
+                "hs_timestamp": str(timestamp_ms),
+                "hubspot_owner_id": owner_id,
+            },
+            "associations": [
+                {
+                    "to": {"id": contact_id},
+                    "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 198}],
+                },
+                {
+                    "to": {"id": deal_id},
+                    "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 210}],
+                },
+            ],
+        }
+        resp = requests.post(
+            f"{self.base_url}/crm/v3/objects/emails",
+            headers=self._headers(),
+            json=body_doc,
+            timeout=self.timeout,
+        )
+        if resp.status_code >= 400:
+            raise HubSpotError(resp.status_code, resp.text, operation="create_email_engagement")
+        return str(resp.json()["id"])
+
+    def create_note(
+        self,
+        *,
+        body: str,
+        owner_id: str,
+        deal_id: str,
+        timestamp_ms: int,
+    ) -> str:
+        """POST /crm/v3/objects/notes — create the internal SDR-brief note
+        associated to the deal. Owner is the SDR so the note is attributable
+        in HubSpot's activity feed.
+        """
+        body_doc = {
+            "properties": {
+                "hs_note_body": body,
+                "hs_timestamp": str(timestamp_ms),
+                "hubspot_owner_id": owner_id,
+            },
+            "associations": [
+                {
+                    "to": {"id": deal_id},
+                    "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 214}],
+                },
+            ],
+        }
+        resp = requests.post(
+            f"{self.base_url}/crm/v3/objects/notes",
+            headers=self._headers(),
+            json=body_doc,
+            timeout=self.timeout,
+        )
+        if resp.status_code >= 400:
+            raise HubSpotError(resp.status_code, resp.text, operation="create_note")
+        return str(resp.json()["id"])
+
+    def create_phone_task(
+        self,
+        *,
+        subject: str,
+        body: str,
+        owner_id: str,
+        contact_id: str,
+        deal_id: str,
+        due_at_ms: int,
+        priority: str = "HIGH",
+        status: str = "NOT_STARTED",
+    ) -> str:
+        """POST /crm/v3/objects/tasks — schedule the paired follow-up call.
+
+        The body is the LLM-drafted call script formatted as Markdown by
+        sdr_engine.send.format_call_script_body() before being passed in.
+        Default due 36h after the email per PHONE_TASK_LEAD_HOURS env var.
+        """
+        body_doc = {
+            "properties": {
+                "hs_task_subject": subject,
+                "hs_task_body": body,
+                "hs_task_priority": priority,
+                "hs_task_status": status,
+                "hs_task_type": "CALL",
+                "hs_timestamp": str(due_at_ms),
+                "hubspot_owner_id": owner_id,
+            },
+            "associations": [
+                {
+                    "to": {"id": deal_id},
+                    "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 216}],
+                },
+                {
+                    "to": {"id": contact_id},
+                    "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 204}],
+                },
+            ],
+        }
+        resp = requests.post(
+            f"{self.base_url}/crm/v3/objects/tasks",
+            headers=self._headers(),
+            json=body_doc,
+            timeout=self.timeout,
+        )
+        if resp.status_code >= 400:
+            raise HubSpotError(resp.status_code, resp.text, operation="create_phone_task")
+        return str(resp.json()["id"])
