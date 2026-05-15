@@ -1,8 +1,8 @@
-# CLAUDE.md
+# AGENTS.md
 
 Project guidance for AI assistants working in this repo.
 
-> **Sync requirement**: this file mirrors `AGENTS.md` (Codex / OpenAI CLI convention). When you edit one, edit the other. Body content must stay identical — only the title line differs. A trivial mismatch is fine for an hour; a substantive drift means one AI assistant has a different mental model than the other.
+> **Sync requirement**: this file mirrors `CLAUDE.md` (Anthropic / Claude Code convention). When you edit one, edit the other. Body content must stay identical — only the title line differs. A trivial mismatch is fine for an hour; a substantive drift means one AI assistant has a different mental model than the other.
 
 ## Project overview
 
