@@ -21,14 +21,12 @@ dev = [
     "ruff>=0.5",
 ]
 
-# This is an internal application, not a distributable Python package.
-# We use `pip install -e .` purely to install dependencies for CI/dev.
-# Tell setuptools NOT to auto-discover packages — the multiple top-level
-# directories (ui/, n8n/, sql/, config/, prompts/) are not Python packages
-# and the flat-layout heuristic would otherwise fail with:
-#   "Multiple top-level packages discovered in a flat-layout"
-[tool.setuptools]
-py-modules = []
+# Internal application — the only importable Python package is `sdr_engine/`.
+# Everything else at the top level (ui/, n8n/, sql/, config/, prompts/) is
+# either configuration, data, or has its own entry point.
+[tool.setuptools.packages.find]
+include = ["sdr_engine*"]
+exclude = ["tests*", "ui*", "n8n*", "sql*", "config*", "prompts*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

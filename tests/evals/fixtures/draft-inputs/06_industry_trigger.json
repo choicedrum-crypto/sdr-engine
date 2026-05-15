@@ -1,0 +1,22 @@
+{
+  "_label": "Industry Trigger — sector signal surfaces a previously cold company",
+  "_variant": "warm_direct_ask",
+  "prospect_type": "industry_trigger",
+  "send_reason": "round-robin",
+  "company_name": "Northwoods Lumber Cooperative",
+  "company_acronym": "Northwoods",
+  "company_industry": "Forestry & Lumber",
+  "contact_first_name": "James",
+  "contact_last_name": "Lindgren",
+  "contact_source": "zoominfo_enriched",
+  "quote_amount": "",
+  "product_line": "",
+  "quote_date_human": "",
+  "renewal_date_or_null": null,
+  "policy_excerpt_or_null": null,
+  "hook_text": "Pacific Northwest lumber default rates up 22% YoY (S&P Global Ratings April 2026); two notable peer bankruptcies in last 60 days",
+  "hook_source": "sector_stress",
+  "anchor_type": "none",
+  "anchor_name": "",
+  "anchor_context": null
+}

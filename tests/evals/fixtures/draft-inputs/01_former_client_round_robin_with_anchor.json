@@ -1,0 +1,22 @@
+{
+  "_label": "Former Client — round-robin send, named past broker as anchor",
+  "_variant": "structured_re_engagement",
+  "prospect_type": "former_client",
+  "send_reason": "round-robin",
+  "company_name": "Advance Polybag",
+  "company_acronym": "API",
+  "company_industry": "Flexible Packaging Manufacturing",
+  "contact_first_name": "Sarah",
+  "contact_last_name": "Mitchell",
+  "contact_source": "existing",
+  "quote_amount": "850000",
+  "product_line": "Trade Credit Insurance (Allianz)",
+  "quote_date_human": "March 2024",
+  "renewal_date_or_null": null,
+  "policy_excerpt_or_null": null,
+  "hook_text": "Q1 wholesale packaging sector default rates up 14% YoY (Atradius Q1 2026 country report)",
+  "hook_source": "sector_stress",
+  "anchor_type": "broker",
+  "anchor_name": "Tom O'Connell",
+  "anchor_context": "Tom O'Connell worked with API on the original 2024 Allianz placement before retiring last fall."
+}
