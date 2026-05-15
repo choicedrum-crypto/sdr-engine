@@ -23,11 +23,10 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
-import time
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template, request
 from dotenv import load_dotenv
+from flask import Flask, abort, jsonify
 
 load_dotenv()
 
@@ -38,9 +37,9 @@ PORT = int(os.getenv("REVIEW_UI_PORT", "5679"))
 LLM_ENDPOINT = os.getenv("LLM_ENDPOINT", "http://127.0.0.1:4000/v1/chat/completions")
 HUBSPOT_API_KEY = os.getenv("HUBSPOT_API_KEY", "")
 
-# Card is considered "stale" if loaded >2h ago (per A8 amendment)
+# Card is considered "stale" if loaded >2h ago (per A8 amendment).
+# Surface staleness banner if last successful scheduler run >25h ago.
 STALE_AFTER_SECONDS = 2 * 60 * 60
-# Surface staleness banner if last successful scheduler run >25h ago
 STALE_RUN_HOURS = 25
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
