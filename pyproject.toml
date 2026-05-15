@@ -21,6 +21,14 @@ dev = [
     "ruff>=0.5",
 ]
 
+# This is an internal application, not a distributable Python package.
+# We use `pip install -e .` purely to install dependencies for CI/dev.
+# Tell setuptools NOT to auto-discover packages — the multiple top-level
+# directories (ui/, n8n/, sql/, config/, prompts/) are not Python packages
+# and the flat-layout heuristic would otherwise fail.
+[tool.setuptools]
+py-modules = []
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
