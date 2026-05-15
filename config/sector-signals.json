@@ -1,0 +1,23 @@
+{
+  "_comment": "Curated trade-credit-specific sector stress signals. Refreshed weekly by Daniel. Module 3's current-event-hook step uses these when no M&A or leadership-change signal is found for a company. Format: NAICS prefix → list of signal records with date + headline + source.",
+  "last_updated": "2026-05-14",
+  "signals_by_naics": {
+    "_example_424": {
+      "_label": "Wholesale Trade - Nondurable Goods",
+      "signals": [
+        {
+          "date": "2026-05-01",
+          "type": "default_rate_uptick",
+          "headline": "Wholesale grocery sector default rate up 18% YoY (Atradius May 2026)",
+          "source": "Atradius Q1 Country Report 2026",
+          "ttl_days": 60
+        }
+      ]
+    }
+  },
+  "_TODO": [
+    "Populate per-NAICS-prefix signals weekly. Daniel curates from Atradius/Coface/Allianz quarterly reports + S&P Trade Credit indices.",
+    "ttl_days = how long this signal remains usable in outreach (default 60). After expiry, drop from prompts.",
+    "Keep file under 50 records to stay within prompt budget — rotate aggressively."
+  ]
+}

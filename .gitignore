@@ -1,6 +1,57 @@
+# Secrets
 .env
+.env.local
+.env.*.local
+
+# Python
 __pycache__/
-*.pyc
-node_modules/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+dist/
+build/
+
+# SQLite (runtime data, never commit)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+queue.db
+.sdr-engine/
+
+# Cloudflare tunnel credentials (UUID-keyed JSON file with secret)
+.cloudflared/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
-~/.sdr-engine/
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Local UI artifacts
+ui/__pycache__/
+
+# Claude Code per-developer settings (permissions allowlist, not shared)
+.claude/settings.local.json
+
+# OneDrive policy excerpts (cached locally, never commit)
+.policy-cache/

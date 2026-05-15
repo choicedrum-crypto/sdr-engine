@@ -1,0 +1,33 @@
+{
+  "_comment": "Approved CTAs for SDR emails. Module 4 filters this array by `allowed_for` containing the current deal's prospect_type, then splices the matching `text` values into the prompt template. The LLM picks one verbatim. NEVER let the model generate CTAs — always pick from this list.",
+  "_TODO": [
+    "TODO(daniel, pre-launch): replace placeholder CTAs below with your 5 approved CTAs. Each CTA's `allowed_for` array must contain at least one of the 7 prospect_type values. Module 4's startup check (per A14) will fail-fast if any prospect_type has zero matching CTAs."
+  ],
+  "ctas": [
+    {
+      "id": "comparison-offer",
+      "text": "Happy to run a quick comparison if you ever want a second look at your current setup — no obligation.",
+      "allowed_for": ["former_client", "bor_target", "lost_opportunity"]
+    },
+    {
+      "id": "one-pager",
+      "text": "If it's useful, I can send a one-page summary of how we're positioned vs the major carriers — let me know.",
+      "allowed_for": ["former_client", "bor_target", "lost_opportunity", "coi_referral", "industry_trigger", "conference", "bankruptcy_trigger"]
+    },
+    {
+      "id": "market-update",
+      "text": "Want me to send our latest market update on the trade-credit cycle? Five minutes to read.",
+      "allowed_for": ["former_client", "bor_target", "lost_opportunity", "coi_referral", "industry_trigger", "conference", "bankruptcy_trigger"]
+    },
+    {
+      "id": "renewal-options",
+      "text": "When your current term comes up for review, happy to share what's available — no pressure.",
+      "allowed_for": ["former_client", "bor_target", "lost_opportunity"]
+    },
+    {
+      "id": "no-pressure-check-in",
+      "text": "If credit risk is on your radar this quarter, I'd be glad to chat — even just to compare notes.",
+      "allowed_for": ["former_client", "bor_target", "lost_opportunity", "coi_referral", "industry_trigger", "conference", "bankruptcy_trigger"]
+    }
+  ]
+}
