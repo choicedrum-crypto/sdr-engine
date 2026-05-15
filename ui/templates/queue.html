@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SDR Queue</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='queue.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">SDR Queue</div>
+  <div class="health" id="health-indicator">
+    {% if scheduler_stale %}
+      <span class="health-warn" title="Last scheduler run is more than 25 hours old. Check OpenClaw.">
+        Last run: {{ last_run.started_at or 'never' }} (stale)
+      </span>
+    {% else %}
+      <span class="health-ok">
+        Last run: {{ last_run.started_at }} ({{ last_run.status }}, {{ last_run.enqueued_count }} enqueued)
+      </span>
+    {% endif %}
+  </div>
+</header>
+
+<main>
+
+{# ─── State: warming (scheduler is mid-run; queue not populated yet) #}
+{% if state == 'warming' %}
+  <section class="state-message">
+    <h1>Drafting today's emails…</h1>
+    <p>The scheduler is currently running. Reload in a minute or two to see today's first card.</p>
+  </section>
+
+{# ─── State: caught_up_done (no pending rows, scheduler finished) #}
+{% elif state == 'caught_up_done' %}
+  <section class="state-message">
+    <h1>All caught up.</h1>
+    <p>No pending cards. The next batch will surface after tomorrow's 06:00 scheduler run.</p>
+  </section>
+
+{# ─── State: card OR send_partial — render the card body #}
+{% else %}
+
+  {% if state == 'send_partial' %}
+  <section class="banner banner-partial">
+    <strong>Partial send — please complete.</strong>
+    The email went out, but
+    {% if not card.hubspot_note_id and not card.hubspot_task_id %}
+      the deal note and follow-up task could not be created.
+    {% elif not card.hubspot_note_id %}
+      the deal note could not be created.
+    {% elif not card.hubspot_task_id %}
+      the follow-up task could not be created.
+    {% endif %}
+    Use the retry buttons below.
+  </section>
+  {% endif %}
+
+  {% if llm_failed %}
+  <section class="banner banner-llm-failure">
+    <strong>AUTO-DRAFT FAILED — please hand-write.</strong>
+    The LLM could not produce a valid draft for this prospect. Write the email
+    yourself below; deal note and call script will need to be added manually
+    in HubSpot.
+  </section>
+  {% endif %}
+
+  <article class="card" data-queue-id="{{ card.id }}">
+
+    {# ─── Inline provenance strip (replaces the badge grid per A10) #}
+    <div class="provenance">
+      <span class="badge badge-{{ card.prospect_type }}">{{ card.prospect_type.replace('_', ' ').upper() }}</span>
+      <span class="separator">·</span>
+      <span>{{ card.send_reason.upper() }}</span>
+      {% if card.anchor_used and card.anchor_used != 'none' %}
+        <span class="separator">·</span>
+        <span>anchor: {{ card.anchor_used }}</span>
+      {% endif %}
+      {% if card.contact_source == 'zoominfo_enriched' %}
+        <span class="separator">·</span>
+        <span class="emphasis">ZoomInfo-enriched</span>
+      {% endif %}
+    </div>
+
+    <div class="company">
+      <h2>{{ card.company_name }}</h2>
+      <div class="contact">
+        {{ card.contact_first_name }} {{ card.contact_last_name }}
+        &lt;{{ card.contact_email }}&gt;
+      </div>
+      <div class="dealmeta">
+        {% if card.quote_amount %}${{ '{:,.0f}'.format(card.quote_amount) }} {% endif %}
+        {{ card.product_line or '' }}
+        {% if card.quote_date_human %} · quoted {{ card.quote_date_human }}{% endif %}
+        {% if card.renewal_date %} · renewal {{ card.renewal_date }}{% endif %}
+      </div>
+    </div>
+
+    <form method="post" action="{{ url_for('queue_send', queue_id=card.id) }}" class="email-form">
+      <label for="subject">Subject</label>
+      <select id="subject-select" onchange="document.getElementById('subject').value = this.value">
+        <option value="{{ card.draft_subject }}">{{ card.draft_subject }}</option>
+        {% if card.draft_subject_alt and card.draft_subject_alt != card.draft_subject %}
+          <option value="{{ card.draft_subject_alt }}">{{ card.draft_subject_alt }}</option>
+        {% endif %}
+      </select>
+      <input type="text" name="subject" id="subject" value="{{ card.draft_subject }}" maxlength="60">
+
+      <label for="body">Email body</label>
+      <textarea name="body" id="body" rows="14" autofocus>{{ card.draft_body }}</textarea>
+      <div class="word-count" id="word-count"></div>
+
+      <div class="actions">
+        {% if state != 'send_partial' %}
+          <button type="submit" class="primary" data-shortcut="s">Send</button>
+        {% endif %}
+        <button type="button" class="secondary" data-shortcut="k"
+                onclick="postTo('{{ url_for('queue_skip', queue_id=card.id) }}')">Skip</button>
+        {% if state == 'send_partial' and not card.hubspot_note_id %}
+          <button type="button" class="retry"
+                  onclick="postTo('{{ url_for('queue_retry_note', queue_id=card.id) }}')">Retry note</button>
+        {% endif %}
+        {% if state == 'send_partial' and not card.hubspot_task_id %}
+          <button type="button" class="retry"
+                  onclick="postTo('{{ url_for('queue_retry_task', queue_id=card.id) }}')">Retry task</button>
+        {% endif %}
+      </div>
+    </form>
+
+    <details class="preview">
+      <summary>Deal note + call script (auto-post to HubSpot)</summary>
+      <h3>Deal Note</h3>
+      <pre>{{ card.deal_note_body }}</pre>
+      <h3>Call Script</h3>
+      <pre>{{ card.call_script_json }}</pre>
+    </details>
+
+  </article>
+
+{% endif %}
+
+</main>
+
+<script src="{{ url_for('static', filename='queue.js') }}"></script>
+</body>
+</html>
