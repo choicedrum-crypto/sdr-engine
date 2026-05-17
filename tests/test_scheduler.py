@@ -131,7 +131,7 @@ def _hs_deal_json(
             "dealstage": "appointmentscheduled",
             "funnel_type": funnel_type,
             "renewal_date": renewal_date,
-            "notes_last_contacted_date": "2024-01-01T00:00:00Z",
+            "notes_last_contacted": "2024-01-01T00:00:00Z",
         },
         "associations": {
             "contacts": {"results": [{"id": contact_id, "type": "deal_to_contact"}]},

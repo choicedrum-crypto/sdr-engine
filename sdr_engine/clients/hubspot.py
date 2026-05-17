@@ -53,7 +53,7 @@ class HubSpotDeal:
     createdate: str | None
     closedate: str | None
     renewal_date: str | None    # may be empty/null
-    notes_last_contacted_date: str | None
+    notes_last_contacted: str | None
     contact_ids: list[str]      # primary + secondary associated contacts
     company_ids: list[str]
     raw: dict[str, Any]
@@ -328,28 +328,39 @@ class HubSpotClient:
 
         Filters applied:
           - pipeline == pipeline_id (the Prospecting pipeline)
-          - notes_last_contacted_date < last_contacted_cutoff_ms IF provided
+          - notes_last_contacted < last_contacted_cutoff_ms IF provided
             (the architecture's 90-day quiet-period rule)
 
         Pulls properties needed for classification + Module 4 substitution +
         Module 1 cooldown/bucket logic. Associations: contacts + companies.
         """
-        filters: list[dict[str, Any]] = [
-            {"propertyName": "pipeline", "operator": "EQ", "value": pipeline_id},
-        ]
+        # Quiet-period filter: deals contacted >cutoff_ms ago OR never contacted at all.
+        # HubSpot's filter semantics: filters within a group are AND'd, groups are OR'd.
+        # The LT operator silently excludes NULL property values — without the second
+        # group, never-contacted deals (the majority in a fresh pipeline) would be
+        # filtered out, which is the opposite of the architecture's intent.
+        pipeline_filter = {"propertyName": "pipeline", "operator": "EQ", "value": pipeline_id}
         if last_contacted_cutoff_ms is not None:
-            filters.append({
-                "propertyName": "notes_last_contacted_date",
-                "operator": "LT",
-                "value": str(last_contacted_cutoff_ms),
-            })
+            filter_groups = [
+                {"filters": [
+                    pipeline_filter,
+                    {"propertyName": "notes_last_contacted", "operator": "LT",
+                     "value": str(last_contacted_cutoff_ms)},
+                ]},
+                {"filters": [
+                    pipeline_filter,
+                    {"propertyName": "notes_last_contacted", "operator": "NOT_HAS_PROPERTY"},
+                ]},
+            ]
+        else:
+            filter_groups = [{"filters": [pipeline_filter]}]
 
         body: dict[str, Any] = {
-            "filterGroups": [{"filters": filters}],
+            "filterGroups": filter_groups,
             "properties": [
                 "dealname", "amount", "createdate", "closedate",
                 "dealstage", "pipeline", "renewal_date",
-                "notes_last_contacted_date", "hs_lastmodifieddate",
+                "notes_last_contacted", "hs_lastmodifieddate",
                 funnel_type_property,
             ],
             "limit": limit,
@@ -484,7 +495,7 @@ def _deal_from_raw(raw: dict[str, Any], funnel_type_property: str) -> HubSpotDea
         createdate=props.get("createdate") or None,
         closedate=props.get("closedate") or None,
         renewal_date=props.get("renewal_date") or None,
-        notes_last_contacted_date=props.get("notes_last_contacted_date") or None,
+        notes_last_contacted=props.get("notes_last_contacted") or None,
         contact_ids=contact_ids,
         company_ids=company_ids,
         raw=raw,
