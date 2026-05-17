@@ -1,0 +1,108 @@
+{
+  "name": "sdr-scheduler",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "1a2b3c4d-1111-2222-3333-444455556666",
+      "name": "Daily 06:00 weekdays",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /path/to/sdr-engine && /path/to/.venv/bin/python scripts/run_scheduler.py"
+      },
+      "id": "2a2b3c4d-aaaa-bbbb-cccc-ddddeeeeffff",
+      "name": "Run scheduler",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.exitCode }}",
+              "rightValue": 0,
+              "operator": {"type": "number", "operation": "notEquals"}
+            }
+          ]
+        }
+      },
+      "id": "3a2b3c4d-9999-8888-7777-666655554444",
+      "name": "Did it fail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{"name": "Content-Type", "value": "application/json"}]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"event_type\": \"scheduler_run_failed\", \"payload\": { \"stderr\": $json.stderr, \"exitCode\": $json.exitCode } }",
+        "options": {}
+      },
+      "id": "4a2b3c4d-5555-6666-7777-888899990000",
+      "name": "Alert OpenClaw",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 200]
+    }
+  ],
+  "connections": {
+    "Daily 06:00 weekdays": {"main": [[{"node": "Run scheduler", "type": "main", "index": 0}]]},
+    "Run scheduler":       {"main": [[{"node": "Did it fail?", "type": "main", "index": 0}]]},
+    "Did it fail?":        {"main": [
+      [{"node": "Alert OpenClaw", "type": "main", "index": 0}],
+      []
+    ]}
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "America/Chicago"
+  },
+  "tags": ["sdr-engine"],
+  "_README": [
+    "Daily scheduler for the SDR engine. Cron fires Mon-Fri at 06:00 local time;",
+    "executes scripts/run_scheduler.py which:",
+    "  1. Pages through HubSpot Prospecting pipeline",
+    "  2. Applies funnel_type classification + cooldown + bucket + rate cap",
+    "  3. Calls Module 3 (context) + Module 4 (LLM draft) + insert_pending_card",
+    "  4. Writes a 'runs' heartbeat row for Module 6's staleness banner",
+    "",
+    "BEFORE ACTIVATING:",
+    "  1. Update the 'Run scheduler' node's command path to the actual repo +",
+    "     virtualenv location on the internal server (the placeholders are",
+    "     /path/to/sdr-engine and /path/to/.venv).",
+    "  2. Confirm OPENCLAW_WEBHOOK_URL env is set in n8n (Settings → Variables).",
+    "  3. Verify the holiday file at config/holidays.json is current for the year.",
+    "  4. Toggle Active.",
+    "",
+    "Daniel runs this manually (Execute Workflow button) for the first 3-5 days",
+    "and inspects ~/.sdr-engine/queue.db + the Review UI before enabling the cron.",
+    "After that, cron runs unattended and Module 8's nightly sweep + weekly digest",
+    "provide ops visibility."
+  ]
+}
