@@ -67,22 +67,32 @@ def create_app(
     tests construct an isolated app pointing at a tmp SQLite file via this factory.
     """
     app = Flask(__name__, template_folder="templates", static_folder="static")
-    app.config["SQLITE_PATH"] = sqlite_path or Path(
+    # None on a kwarg means "fall through to env"; any explicit string
+    # (including empty) overrides env. Tests pass "" to force-disable.
+    app.config["SQLITE_PATH"] = sqlite_path if sqlite_path is not None else Path(
         os.path.expanduser(os.getenv("SQLITE_PATH", "~/.sdr-engine/queue.db"))
     )
-    app.config["HUBSPOT_API_KEY"] = hubspot_api_key or os.getenv("HUBSPOT_API_KEY", "")
-    app.config["HUBSPOT_OWNER_ID"] = hubspot_owner_id or os.getenv("HUBSPOT_OWNER_ID", "")
+    app.config["HUBSPOT_API_KEY"] = (
+        hubspot_api_key if hubspot_api_key is not None else os.getenv("HUBSPOT_API_KEY", "")
+    )
+    app.config["HUBSPOT_OWNER_ID"] = (
+        hubspot_owner_id if hubspot_owner_id is not None else os.getenv("HUBSPOT_OWNER_ID", "")
+    )
     app.config["HUBSPOT_BASE_URL"] = hubspot_base_url
-    app.config["LLM_ENDPOINT"] = llm_endpoint or os.getenv(
-        "LLM_ENDPOINT", "http://127.0.0.1:4000/v1/chat/completions"
+    app.config["LLM_ENDPOINT"] = (
+        llm_endpoint if llm_endpoint is not None else os.getenv(
+            "LLM_ENDPOINT", "http://127.0.0.1:4000/v1/chat/completions"
+        )
     )
     # Actual email delivery webhook (n8n workflow with Outlook/SMTP node).
     # Without this, HubSpot logs the engagement but no email is delivered.
     app.config["N8N_SEND_EMAIL_WEBHOOK_URL"] = (
-        n8n_send_webhook_url or os.getenv("N8N_SEND_EMAIL_WEBHOOK_URL", "")
+        n8n_send_webhook_url if n8n_send_webhook_url is not None
+        else os.getenv("N8N_SEND_EMAIL_WEBHOOK_URL", "")
     )
     app.config["N8N_AUTH_HEADER_VALUE"] = (
-        n8n_auth_header_value or os.getenv("N8N_AUTH_HEADER_VALUE", "")
+        n8n_auth_header_value if n8n_auth_header_value is not None
+        else os.getenv("N8N_AUTH_HEADER_VALUE", "")
     )
 
     # ─── DB connection lifecycle (per-request) ─────────────────────
