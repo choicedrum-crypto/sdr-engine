@@ -1,0 +1,93 @@
+{
+  "name": "sdr-send-email",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sdr-send-email",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1e5a3f9c-1111-2222-3333-444455556666",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "sdr-send-email"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ $json.body.subject }}",
+        "bodyContent": "={{ $json.body.body }}",
+        "toRecipients": "={{ $json.body.to }}",
+        "additionalFields": {
+          "bodyContentType": "Text",
+          "saveToSentItems": true
+        }
+      },
+      "id": "2e5a3f9c-aaaa-bbbb-cccc-ddddeeeeffff",
+      "name": "Microsoft Outlook — Send",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Daniel TCIA Outlook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"sent\": true, \"to\": $json.body.to, \"subject\": $json.body.subject } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "3e5a3f9c-9999-8888-7777-666655554444",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [800, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Microsoft Outlook — Send", "type": "main", "index": 0}]]
+    },
+    "Microsoft Outlook — Send": {
+      "main": [[{"node": "Respond OK", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "tags": ["sdr-engine"],
+  "_README": [
+    "Pre-built workflow for sdr-engine's Module 7 email delivery path.",
+    "Import this file via n8n UI: Workflows → Import from File.",
+    "After import you must:",
+    "  1. Click 'Microsoft Outlook — Send' node",
+    "  2. Credentials dropdown → 'Create New' → Microsoft Outlook OAuth2 API",
+    "  3. Sign in with Daniel's TCIA M365 account (one-time OAuth flow)",
+    "  4. Save the workflow",
+    "  5. Toggle 'Active' (top right) — this generates the PRODUCTION webhook URL",
+    "  6. Click the Webhook node to copy the production URL → paste into .env",
+    "     as N8N_SEND_EMAIL_WEBHOOK_URL.",
+    "",
+    "Payload shape this workflow expects:",
+    "  POST /webhook/sdr-send-email",
+    "  Content-Type: application/json",
+    "  Body: {\"to\": \"prospect@example.com\", \"subject\": \"...\", \"body\": \"...\"}",
+    "",
+    "Response on success: 200 with {\"sent\": true, \"to\": \"...\", \"subject\": \"...\"}",
+    "Response on failure: n8n returns the error from the Outlook node (4xx/5xx)."
+  ]
+}

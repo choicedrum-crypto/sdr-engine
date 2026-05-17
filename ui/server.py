@@ -58,6 +58,8 @@ def create_app(
     hubspot_owner_id: str | None = None,
     hubspot_base_url: str = "https://api.hubapi.com",
     llm_endpoint: str | None = None,
+    n8n_send_webhook_url: str | None = None,
+    n8n_auth_header_value: str | None = None,
 ) -> Flask:
     """Build the Flask app with explicit configuration.
 
@@ -73,6 +75,14 @@ def create_app(
     app.config["HUBSPOT_BASE_URL"] = hubspot_base_url
     app.config["LLM_ENDPOINT"] = llm_endpoint or os.getenv(
         "LLM_ENDPOINT", "http://127.0.0.1:4000/v1/chat/completions"
+    )
+    # Actual email delivery webhook (n8n workflow with Outlook/SMTP node).
+    # Without this, HubSpot logs the engagement but no email is delivered.
+    app.config["N8N_SEND_EMAIL_WEBHOOK_URL"] = (
+        n8n_send_webhook_url or os.getenv("N8N_SEND_EMAIL_WEBHOOK_URL", "")
+    )
+    app.config["N8N_AUTH_HEADER_VALUE"] = (
+        n8n_auth_header_value or os.getenv("N8N_AUTH_HEADER_VALUE", "")
     )
 
     # ─── DB connection lifecycle (per-request) ─────────────────────
@@ -159,7 +169,10 @@ def create_app(
             contact_id=card.contact_id,
             deal_id=card.deal_id,
             company_name=card.company_name,
+            contact_email=card.contact_email,
             hubspot=_hubspot_client(),
+            n8n_send_webhook_url=app.config["N8N_SEND_EMAIL_WEBHOOK_URL"] or None,
+            n8n_auth_header_value=app.config["N8N_AUTH_HEADER_VALUE"] or None,
             existing_engagement_id=card.hubspot_engagement_id,
             existing_note_id=card.hubspot_note_id,
             existing_task_id=card.hubspot_task_id,
@@ -240,7 +253,14 @@ def create_app(
             contact_id=card.contact_id,
             deal_id=card.deal_id,
             company_name=card.company_name,
+            contact_email=card.contact_email,
             hubspot=_hubspot_client(),
+            # Retry path: engagement already exists → send_artifacts skips
+            # the n8n send (which already delivered) and only fires the
+            # missing HubSpot writes. Still pass the webhook URL for
+            # consistency in case of an edge case where engagement_id is None.
+            n8n_send_webhook_url=app.config["N8N_SEND_EMAIL_WEBHOOK_URL"] or None,
+            n8n_auth_header_value=app.config["N8N_AUTH_HEADER_VALUE"] or None,
             existing_engagement_id=card.hubspot_engagement_id,
             existing_note_id=card.hubspot_note_id,
             existing_task_id=card.hubspot_task_id,
