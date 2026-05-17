@@ -1,22 +1,19 @@
 """Insert one test queue row for the end-to-end smoke test.
 
-Sane defaults so a minimal invocation works:
-    python scripts/insert_test_card.py --contact-email you@gmail.com
+All four IDs are required — the schema's deal_id / contact_id / company_id
+ARE the HubSpot IDs (Module 7 passes them directly to engagement-create),
+and we need a real prospect email to deliver the test message to.
 
-Customizable defaults for the smoke test:
     python scripts/insert_test_card.py \\
         --contact-email you@gmail.com \\
-        --company-name "Test Co Inc" \\
-        --deal-id "smoke-test-001" \\
-        --hubspot-deal-id "REAL_HUBSPOT_DEAL_ID" \\
-        --hubspot-contact-id "REAL_HUBSPOT_CONTACT_ID" \\
-        --hubspot-company-id "REAL_HUBSPOT_COMPANY_ID"
+        --hubspot-deal-id    REAL_HUBSPOT_DEAL_ID \\
+        --hubspot-contact-id REAL_HUBSPOT_CONTACT_ID \\
+        --hubspot-company-id REAL_HUBSPOT_COMPANY_ID
 
-The HubSpot IDs are what Module 7 will use for the email engagement +
-associations. Use a test deal in HubSpot's Prospecting pipeline so the
-email/note/task actually land somewhere safe. Without --hubspot-* args,
-defaults are placeholders that WILL fail at Module 7 step time — fine
-for testing the UI render path but not the full Send flow.
+Use a test deal in HubSpot's Prospecting pipeline so the email, note,
+and task land somewhere safe. Use YOUR personal email as the contact
+email so you can see what the prospect actually receives in the inbox
+check (sender identity, DKIM/SPF/DMARC headers).
 """
 from __future__ import annotations
 
@@ -76,13 +73,14 @@ def main() -> int:
     parser.add_argument("--first-name", default="Daniel")
     parser.add_argument("--last-name", default="Bradley")
     parser.add_argument("--company-name", default="Test Co Inc")
-    parser.add_argument("--deal-id", default="smoke-test-001",
-                        help="Local deal_id (internal — not a HubSpot ID)")
-    parser.add_argument("--hubspot-deal-id", default="placeholder-deal",
-                        help="REAL HubSpot deal ID — required for Module 7 to associate")
-    parser.add_argument("--hubspot-contact-id", default="placeholder-contact",
-                        help="REAL HubSpot contact ID — required for Module 7")
-    parser.add_argument("--hubspot-company-id", default="placeholder-company",
+    # The schema's deal_id / contact_id / company_id columns ARE the HubSpot
+    # IDs — Module 7 passes them directly to engagement-create. We deliberately
+    # don't separate "internal" from "HubSpot" IDs; the queue mirrors HubSpot.
+    parser.add_argument("--hubspot-deal-id", required=True,
+                        help="REAL HubSpot deal ID — stored as queue.deal_id, used for engagement associations")
+    parser.add_argument("--hubspot-contact-id", required=True,
+                        help="REAL HubSpot contact ID")
+    parser.add_argument("--hubspot-company-id", required=True,
                         help="REAL HubSpot company ID")
     parser.add_argument("--prospect-type", default="former_client",
                         choices=["former_client", "bor_target", "coi_referral",
@@ -113,7 +111,7 @@ def main() -> int:
         "deal_note_body, call_script_json, status) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            args.deal_id,
+            args.hubspot_deal_id,
             args.hubspot_company_id,
             args.company_name,
             args.hubspot_contact_id,
@@ -135,6 +133,7 @@ def main() -> int:
     conn.close()
 
     print(f"OK — inserted queue row id={queue_id}")
+    print(f"   HubSpot deal_id: {args.hubspot_deal_id}")
     print(f"   Company: {args.company_name}")
     print(f"   Contact: {args.first_name} {args.last_name} <{args.contact_email}>")
     print(f"   Prospect type: {args.prospect_type} / send_reason: {args.send_reason}")
@@ -142,12 +141,6 @@ def main() -> int:
     print("Next: start the UI server and open /queue:")
     print("   python ui/server.py")
     print("   open http://127.0.0.1:5679/queue")
-
-    if "placeholder" in (args.hubspot_deal_id, args.hubspot_contact_id, args.hubspot_company_id):
-        print()
-        print("⚠  HubSpot IDs are placeholders. Module 7 will fail at email-engagement time.")
-        print("   For a real smoke test, pass --hubspot-deal-id / --hubspot-contact-id /")
-        print("   --hubspot-company-id with real HubSpot test-record IDs.")
     return 0
 
 
