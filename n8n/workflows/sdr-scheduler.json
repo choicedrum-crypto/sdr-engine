@@ -20,12 +20,31 @@
     },
     {
       "parameters": {
-        "command": "cd /path/to/sdr-engine && /path/to/.venv/bin/python scripts/run_scheduler.py"
+        "method": "POST",
+        "url": "https://sdr.tradecredit.agency/scheduler/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer ={{ $env.SCHEDULER_AUTH_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "timeout": 300000,
+          "response": {"response": {"neverError": true, "responseFormat": "json"}}
+        }
       },
       "id": "2a2b3c4d-aaaa-bbbb-cccc-ddddeeeeffff",
       "name": "Run scheduler",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [500, 300]
     },
     {
@@ -34,9 +53,9 @@
           "options": {"caseSensitive": false, "leftValue": "", "typeValidation": "loose"},
           "conditions": [
             {
-              "leftValue": "={{ $json.exitCode }}",
+              "leftValue": "={{ $json.errors }}",
               "rightValue": 0,
-              "operator": {"type": "number", "operation": "notEquals"}
+              "operator": {"type": "array", "operation": "lengthGt", "rightType": "number"}
             }
           ]
         }
@@ -57,7 +76,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={ \"event_type\": \"scheduler_run_failed\", \"payload\": { \"stderr\": $json.stderr, \"exitCode\": $json.exitCode } }",
+        "jsonBody": "={ \"event_type\": \"scheduler_run_failed\", \"payload\": $json }",
         "options": {}
       },
       "id": "4a2b3c4d-5555-6666-7777-888899990000",
@@ -85,24 +104,33 @@
   },
   "tags": ["sdr-engine"],
   "_README": [
-    "Daily scheduler for the SDR engine. Cron fires Mon-Fri at 06:00 local time;",
-    "executes scripts/run_scheduler.py which:",
-    "  1. Pages through HubSpot Prospecting pipeline",
-    "  2. Applies funnel_type classification + cooldown + bucket + rate cap",
-    "  3. Calls Module 3 (context) + Module 4 (LLM draft) + insert_pending_card",
-    "  4. Writes a 'runs' heartbeat row for Module 6's staleness banner",
+    "Daily scheduler for the SDR engine — cross-host version.",
+    "Cron fires Mon-Fri at 06:00 local. POSTs to the Flask UI's",
+    "/scheduler/run endpoint which runs Module 1 and returns the",
+    "ScheduleResult as JSON. n8n branches on the result.errors array.",
+    "",
+    "Earlier version used the Execute Command node, which requires the",
+    "Python code to live on the n8n container's filesystem. With n8n in",
+    "Docker on a separate machine from where Python runs, that doesn't",
+    "work. HTTP Request via Cloudflare Tunnel does.",
     "",
     "BEFORE ACTIVATING:",
-    "  1. Update the 'Run scheduler' node's command path to the actual repo +",
-    "     virtualenv location on the internal server (the placeholders are",
-    "     /path/to/sdr-engine and /path/to/.venv).",
-    "  2. Confirm OPENCLAW_WEBHOOK_URL env is set in n8n (Settings → Variables).",
-    "  3. Verify the holiday file at config/holidays.json is current for the year.",
-    "  4. Toggle Active.",
+    "  1. Set the SCHEDULER_AUTH_TOKEN n8n environment variable to match",
+    "     the value in the Flask app's .env (Settings -> Variables in n8n).",
+    "  2. Set OPENCLAW_WEBHOOK_URL (same — for the Alert OpenClaw node).",
+    "  3. The Flask UI must be running and reachable at",
+    "     https://sdr.tradecredit.agency. If you put it on a different",
+    "     hostname, update the URL in the Run scheduler node.",
+    "  4. Toggle the workflow Active.",
     "",
-    "Daniel runs this manually (Execute Workflow button) for the first 3-5 days",
-    "and inspects ~/.sdr-engine/queue.db + the Review UI before enabling the cron.",
-    "After that, cron runs unattended and Module 8's nightly sweep + weekly digest",
-    "provide ops visibility."
+    "  5. Daniel runs manually (Execute Workflow button) for the first",
+    "     3-5 days and inspects ~/.sdr-engine/queue.db + the Review UI",
+    "     before enabling the cron. After that, cron runs unattended and",
+    "     Module 8's nightly sweep + weekly digest provide ops visibility.",
+    "",
+    "Timeout: scheduler can take 30s-2min depending on pipeline + LLM",
+    "speed. n8n HTTP Request timeout is 300s (5 min) to cover comfortably.",
+    "neverError=true means n8n doesn't throw on non-2xx; the IF-node",
+    "branches on the response body's errors array instead."
   ]
 }

@@ -44,6 +44,7 @@ from sdr_engine.queue_ops import (
     mark_skipped,
     update_partial_ids,
 )
+from sdr_engine.scheduler import config_from_env, run_scheduler
 from sdr_engine.send import send_artifacts
 
 load_dotenv()
@@ -60,6 +61,8 @@ def create_app(
     llm_endpoint: str | None = None,
     n8n_send_webhook_url: str | None = None,
     n8n_auth_header_value: str | None = None,
+    scheduler_auth_token: str | None = None,
+    repo_root: Path | None = None,
 ) -> Flask:
     """Build the Flask app with explicit configuration.
 
@@ -94,6 +97,15 @@ def create_app(
         n8n_auth_header_value if n8n_auth_header_value is not None
         else os.getenv("N8N_AUTH_HEADER_VALUE", "")
     )
+    # Shared secret for POST /scheduler/run. n8n's HTTP Request node sends
+    # Authorization: Bearer <token>. If empty, the route is open (acceptable
+    # only when the route lives behind Cloudflare Access OR the network is
+    # already private).
+    app.config["SCHEDULER_AUTH_TOKEN"] = (
+        scheduler_auth_token if scheduler_auth_token is not None
+        else os.getenv("SCHEDULER_AUTH_TOKEN", "")
+    )
+    app.config["REPO_ROOT"] = repo_root or Path(__file__).resolve().parent.parent
 
     # ─── DB connection lifecycle (per-request) ─────────────────────
     def _get_db() -> sqlite3.Connection:
@@ -295,6 +307,58 @@ def create_app(
             "error": result.error,
             "needs_modules": result.needs,
         }), 501
+
+    # ─── POST /scheduler/run — invoke Module 1 from n8n cron ──────
+    @app.post("/scheduler/run")
+    def scheduler_run():
+        """Run the Module 1 scheduler synchronously and return the result
+        as JSON. Designed for n8n's HTTP Request node to call from cron.
+
+        Same code path as scripts/run_scheduler.py — both call into
+        sdr_engine.scheduler.run_scheduler(), so behavior is identical
+        whether invoked from CLI or webhook. The webhook flavor exists
+        because Daniel's n8n lives in Docker on a separate machine from
+        where the Python code runs, so n8n's executeCommand can't reach
+        the script directly.
+
+        Auth: optional Bearer token in the Authorization header. When
+        SCHEDULER_AUTH_TOKEN is configured, requests without a matching
+        token return 401. When empty, the route is open (defensible only
+        when behind Cloudflare Access OR on a private network).
+
+        Timing: the scheduler can take 30s-2min depending on pipeline size
+        and LLM latency. n8n's default HTTP Request timeout is 300s which
+        covers this comfortably. Flask's dev server is single-threaded —
+        long scheduler runs block other UI requests. Production should
+        use gunicorn with multiple workers.
+        """
+        # Auth check (only when token is configured)
+        required = app.config["SCHEDULER_AUTH_TOKEN"]
+        if required:
+            provided = request.headers.get("Authorization", "")
+            expected = f"Bearer {required}"
+            if provided != expected:
+                return jsonify({"error": "unauthorized"}), 401
+
+        if not app.config["HUBSPOT_API_KEY"]:
+            return jsonify({"error": "HUBSPOT_API_KEY not configured"}), 500
+        config, err = config_from_env(app.config["REPO_ROOT"])
+        if err:
+            return jsonify({"error": err}), 500
+
+        result = run_scheduler(
+            db=_get_db(),
+            hubspot=_hubspot_client(),
+            prompt_path=app.config["REPO_ROOT"] / "prompts" / "draft-pipeline.txt",
+            ctas_path=app.config["REPO_ROOT"] / "prompts" / "ctas.json",
+            config=config,
+            webhook_url=os.getenv("OPENCLAW_WEBHOOK_URL") or None,
+        )
+        body = result.to_dict()
+        # 200 on clean runs (zero enqueues IS a valid clean run); 500 on
+        # outright failure so n8n's IF-node can branch and fire an alert.
+        status_code = 500 if result.errors else 200
+        return jsonify(body), status_code
 
     # ─── GET /health ──────────────────────────────────────────────
     @app.get("/health")

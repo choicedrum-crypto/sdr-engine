@@ -32,10 +32,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from sdr_engine.clients.hubspot import HubSpotClient, HubSpotDeal
 from sdr_engine.context import gather_context_for_deal
@@ -91,6 +93,48 @@ class ScheduleResult:
     deferred_overflow: int = 0      # round-robin slots that lost to rate cap
     llm_failures: int = 0           # NEEDS_HUMAN drafts produced
     errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Plain dict for JSON serialization. Used by both the CLI script
+        and the Flask /scheduler/run route so the wire shape is identical."""
+        return {
+            "candidates_examined": self.candidates_examined,
+            "enqueued": self.enqueued,
+            "enqueued_sharp": self.enqueued_sharp,
+            "enqueued_round_robin": self.enqueued_round_robin,
+            "dropped": self.dropped,
+            "dropped_by_reason": self.dropped_by_reason,
+            "deferred_overflow": self.deferred_overflow,
+            "llm_failures": self.llm_failures,
+            "errors": self.errors,
+        }
+
+
+def config_from_env(
+    repo_root: Path,
+    getenv=os.getenv,
+) -> tuple[ScheduleConfig | None, str | None]:
+    """Build a ScheduleConfig from env vars. Returns (config, error_message).
+
+    Used by both scripts/run_scheduler.py and the /scheduler/run Flask
+    route so the env-reading logic stays in one place. Caller decides
+    how to handle the error_message (print + exit 1 for CLI; 500 for HTTP).
+    """
+    pipeline_id = getenv("HUBSPOT_PROSPECTING_PIPELINE_ID", "")
+    if not pipeline_id:
+        return None, "HUBSPOT_PROSPECTING_PIPELINE_ID is required"
+    return ScheduleConfig(
+        pipeline_id=pipeline_id,
+        funnel_type_property=getenv("HUBSPOT_PROSPECT_TYPE_PROPERTY", "funnel_type"),
+        daily_send_cap=int(getenv("DAILY_SEND_CAP", "3")),
+        working_days_per_year=int(getenv("WORKING_DAYS_PER_YEAR", "250")),
+        renewal_lead_days=int(getenv("RENEWAL_LEAD_DAYS", "60")),
+        holiday_file=repo_root / "config" / "holidays.json",
+        llm_endpoint=getenv("LLM_ENDPOINT", "http://127.0.0.1:4000/v1/chat/completions"),
+        llm_primary_model=getenv("LLM_MODEL_PRIMARY", "local-main"),
+        llm_fallback_model=getenv("LLM_MODEL_FALLBACK", "heavy-main"),
+        llm_timeout_seconds=int(getenv("LLM_TIMEOUT_SECONDS", "180")),
+    ), None
 
 
 # ─── Working-day index ──────────────────────────────────────────────
