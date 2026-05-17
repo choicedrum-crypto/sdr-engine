@@ -1,7 +1,12 @@
-"""Module 1 entry point — daily scheduler invocation.
+"""Module 1 entry point — daily scheduler invocation (CLI flavor).
 
-Run via n8n cron at 06:00 local:
+Run via n8n cron at 06:00 local OR directly during dry-runs:
     0 6 * * 1-5  cd /path/to/sdr-engine && python scripts/run_scheduler.py
+
+For cross-host n8n triggering (n8n in Docker on a separate machine
+than where the Python code lives), use the POST /scheduler/run webhook
+endpoint on the Flask UI instead — same scheduler invocation, reachable
+via the Cloudflare Tunnel.
 
 Reads env (HUBSPOT_API_KEY, HUBSPOT_PROSPECTING_PIPELINE_ID,
 HUBSPOT_PROSPECT_TYPE_PROPERTY, SQLITE_PATH, LLM_ENDPOINT,
@@ -9,8 +14,8 @@ LLM_MODEL_PRIMARY, LLM_MODEL_FALLBACK, OPENCLAW_WEBHOOK_URL,
 DAILY_SEND_CAP, WORKING_DAYS_PER_YEAR, RENEWAL_LEAD_DAYS).
 
 Exits 0 on a clean run (even if zero deals enqueued — empty queue is
-normal on non-allocated days). Exits 1 on a fatal error so n8n can
-mark the workflow execution as failed and OpenClaw alerts.
+normal on non-allocated days). Exits 1 on a fatal error so n8n / cron
+can mark the workflow execution as failed and OpenClaw alerts.
 """
 from __future__ import annotations
 
@@ -24,7 +29,7 @@ from dotenv import load_dotenv
 
 from sdr_engine.clients.hubspot import HubSpotClient
 from sdr_engine.monitoring import notify_openclaw
-from sdr_engine.scheduler import ScheduleConfig, run_scheduler
+from sdr_engine.scheduler import config_from_env, run_scheduler
 
 load_dotenv()
 
@@ -39,26 +44,16 @@ def main() -> int:
         return 1
 
     hubspot_key = os.getenv("HUBSPOT_API_KEY", "")
-    pipeline_id = os.getenv("HUBSPOT_PROSPECTING_PIPELINE_ID", "")
-    if not hubspot_key or not pipeline_id:
-        print("ERROR: HUBSPOT_API_KEY and HUBSPOT_PROSPECTING_PIPELINE_ID required",
-              file=sys.stderr)
+    if not hubspot_key:
+        print("ERROR: HUBSPOT_API_KEY is required", file=sys.stderr)
         return 1
 
-    config = ScheduleConfig(
-        pipeline_id=pipeline_id,
-        funnel_type_property=os.getenv("HUBSPOT_PROSPECT_TYPE_PROPERTY", "funnel_type"),
-        daily_send_cap=int(os.getenv("DAILY_SEND_CAP", "3")),
-        working_days_per_year=int(os.getenv("WORKING_DAYS_PER_YEAR", "250")),
-        renewal_lead_days=int(os.getenv("RENEWAL_LEAD_DAYS", "60")),
-        holiday_file=ROOT / "config" / "holidays.json",
-        llm_endpoint=os.getenv("LLM_ENDPOINT", "http://127.0.0.1:4000/v1/chat/completions"),
-        llm_primary_model=os.getenv("LLM_MODEL_PRIMARY", "local-main"),
-        llm_fallback_model=os.getenv("LLM_MODEL_FALLBACK", "heavy-main"),
-        llm_timeout_seconds=int(os.getenv("LLM_TIMEOUT_SECONDS", "180")),
-    )
-    webhook = os.getenv("OPENCLAW_WEBHOOK_URL", "")
+    config, err = config_from_env(ROOT)
+    if err:
+        print(f"ERROR: {err}", file=sys.stderr)
+        return 1
 
+    webhook = os.getenv("OPENCLAW_WEBHOOK_URL", "")
     hubspot = HubSpotClient(api_key=hubspot_key)
     conn = sqlite3.connect(sqlite_path, isolation_level=None)
     try:
@@ -73,25 +68,12 @@ def main() -> int:
     finally:
         conn.close()
 
-    summary = {
-        "candidates_examined": result.candidates_examined,
-        "enqueued": result.enqueued,
-        "enqueued_sharp": result.enqueued_sharp,
-        "enqueued_round_robin": result.enqueued_round_robin,
-        "dropped": result.dropped,
-        "dropped_by_reason": result.dropped_by_reason,
-        "deferred_overflow": result.deferred_overflow,
-        "llm_failures": result.llm_failures,
-        "errors": result.errors,
-    }
+    summary = result.to_dict()
     print(json.dumps(summary, indent=2))
 
-    # Fire summary alert if anything notable happened
     if result.errors or result.llm_failures or result.enqueued:
         notify_openclaw(webhook, "scheduler_run_summary", summary)
 
-    # Exit 1 only on outright failure; LLM failures alone don't fail the run
-    # (Module 6 renders them with the AUTO-DRAFT FAILED banner).
     return 1 if result.errors else 0
 
 
