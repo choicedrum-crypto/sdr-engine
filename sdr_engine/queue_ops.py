@@ -270,6 +270,180 @@ def update_partial_ids(
         )
 
 
+# ─── Inserts (Module 1 — scheduler) ────────────────────────────────
+def insert_pending_card(
+    db: sqlite3.Connection,
+    *,
+    deal_id: str,
+    company_id: str,
+    company_name: str,
+    contact_id: str,
+    contact_email: str,
+    contact_first_name: str | None,
+    contact_last_name: str | None,
+    send_reason: str,
+    prospect_type: str,
+    funnel_types_all: list[str],
+    contact_source: str,
+    quote_amount: float | None,
+    product_line: str | None,
+    quote_date_human: str | None,
+    renewal_date: str | None,
+    policy_excerpt: str | None,
+    hook_text: str | None,
+    hook_source: str | None,
+    draft_subject: str,
+    draft_subject_alt: str | None,
+    draft_body: str,
+    cta_chosen: str | None,
+    deal_note_body: str,
+    call_script_json: str,
+    anchor_used: str | None,
+    hook_used: str | None,
+    llm_model_used: str | None,
+    llm_attempts: int,
+) -> int:
+    """Insert a new pending queue row. Returns the new row id.
+
+    Module 1's scheduler calls this once per surviving deal after Module 4
+    produces a valid draft. The caller is responsible for the cooldown +
+    rate-cap checks BEFORE invoking this — insert_pending_card itself
+    just writes the row.
+
+    funnel_types_all is the original multi-checkbox value (list of all
+    tags on the deal) — serialized as JSON for the queue's analytics
+    column. prospect_type is the SINGLE warmest value picked by
+    pick_prospect_type() and is what Module 4 / Module 6 see.
+    """
+    cursor = db.execute(
+        """
+        INSERT INTO queue (
+            deal_id, company_id, company_name, contact_id, contact_email,
+            contact_first_name, contact_last_name,
+            send_reason, prospect_type, funnel_types_all, contact_source,
+            quote_amount, product_line, quote_date_human, renewal_date,
+            policy_excerpt, hook_text, hook_source,
+            draft_subject, draft_subject_alt, draft_body, cta_chosen,
+            deal_note_body, call_script_json,
+            anchor_used, hook_used, llm_model_used, llm_attempts,
+            status
+        ) VALUES (
+            ?, ?, ?, ?, ?,
+            ?, ?,
+            ?, ?, ?, ?,
+            ?, ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?, ?,
+            ?, ?,
+            ?, ?, ?, ?,
+            'pending'
+        )
+        """,
+        (
+            deal_id, company_id, company_name, contact_id, contact_email,
+            contact_first_name, contact_last_name,
+            send_reason, prospect_type, json.dumps(funnel_types_all), contact_source,
+            quote_amount, product_line, quote_date_human, renewal_date,
+            policy_excerpt, hook_text, hook_source,
+            draft_subject, draft_subject_alt, draft_body, cta_chosen,
+            deal_note_body, call_script_json,
+            anchor_used, hook_used, llm_model_used, llm_attempts,
+        ),
+    )
+    return cursor.lastrowid
+
+
+def has_active_or_cooldown_row(
+    db: sqlite3.Connection,
+    deal_id: str,
+    *,
+    active_window_days: int = 30,
+    skip_cooldown_days: int = 30,
+    dropped_cooldown_days: int = 90,
+) -> tuple[bool, str | None]:
+    """Cooldown check for Module 1. Three overlapping rules per architecture
+    + A11 (reason-aware dropped cooldown).
+
+    Returns (blocked, reason). blocked=True means the scheduler should
+    skip this deal on the current run.
+
+    Rules:
+      1. queue.status IN ('pending','sent','edit-sent','send_partial')
+         within active_window_days → already in-flight, skip
+      2. queue.status = 'skipped' within skip_cooldown_days → SDR
+         actively dismissed; respect their choice
+      3. dropped.dropped_at within dropped_cooldown_days AND reason is
+         a non-recoverable category → don't retry the same dead end
+
+    Recoverable dropped reasons (missing_prospect_type, company_not_in_hubspot)
+    do NOT block — Module 1 re-evaluates them on the next run so user
+    fixes to HubSpot data take effect immediately.
+    """
+    active_cutoff = (_utcnow_iso_dt() - timedelta(days=active_window_days)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    skip_cutoff = (_utcnow_iso_dt() - timedelta(days=skip_cooldown_days)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    dropped_cutoff = (_utcnow_iso_dt() - timedelta(days=dropped_cooldown_days)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    row = db.execute(
+        "SELECT status FROM queue WHERE deal_id = ? "
+        "AND status IN ('pending','sent','edit-sent','send_partial','force-enqueued') "
+        "AND (actioned_at IS NULL OR actioned_at > ?) LIMIT 1",
+        (deal_id, active_cutoff),
+    ).fetchone()
+    if row:
+        return True, f"already_in_flight (status={row[0]})"
+
+    row = db.execute(
+        "SELECT actioned_at FROM queue WHERE deal_id = ? AND status = 'skipped' "
+        "AND actioned_at > ? LIMIT 1",
+        (deal_id, skip_cutoff),
+    ).fetchone()
+    if row:
+        return True, f"skip_cooldown_until_{row[0]}"
+
+    NONRECOVERABLE_REASONS = {
+        "inactive_company",
+        "no_qualified_contact_at_company",
+        "no_valid_contact_after_enrichment",
+        "opted_out",
+        "bad_email",
+        "quarantined",
+    }
+    row = db.execute(
+        "SELECT reason, dropped_at FROM dropped WHERE deal_id = ? AND dropped_at > ? "
+        "ORDER BY dropped_at DESC LIMIT 1",
+        (deal_id, dropped_cutoff),
+    ).fetchone()
+    if row and row[0] in NONRECOVERABLE_REASONS:
+        return True, f"dropped_cooldown ({row[0]} on {row[1]})"
+
+    return False, None
+
+
+def insert_dropped(
+    db: sqlite3.Connection,
+    deal_id: str,
+    reason: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Record why a deal was filtered out. Module 1 + Module 2.5 both call this."""
+    db.execute(
+        "INSERT INTO dropped (deal_id, reason, metadata) VALUES (?, ?, ?)",
+        (deal_id, reason, json.dumps(metadata) if metadata else None),
+    )
+
+
+def _utcnow_iso_dt() -> datetime:
+    """Local utility for cooldown date arithmetic — returns a real datetime
+    (not the ISO string _utcnow_iso() returns). Avoids the round-trip parse."""
+    return datetime.now(UTC)
+
+
 # ─── Diff detection ────────────────────────────────────────────────
 def compute_edit_diff(original_body: str, posted_body: str) -> dict[str, str] | None:
     """Return {'before': original, 'after': posted} if they differ; None if not.

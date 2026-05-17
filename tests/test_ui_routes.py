@@ -27,12 +27,15 @@ def app(tmp_queue_db):
     """Flask app pointing at the per-test SQLite db.
 
     HubSpot owner id + api key are set to non-empty so probes don't short-
-    circuit on 'unconfigured'.
+    circuit on 'unconfigured'. n8n webhook explicitly disabled so these
+    pre-amendment tests stay testing the log-only path; n8n integration
+    tests live in test_send.py.
     """
     return create_app(
         sqlite_path=tmp_queue_db,
         hubspot_api_key="test-hs-key",
         hubspot_owner_id="owner-99",
+        n8n_send_webhook_url="",  # force-disable; isolate from any local .env value
     )
 
 
