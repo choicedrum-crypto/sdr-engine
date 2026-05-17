@@ -111,7 +111,7 @@ def _make_deal(
         createdate="2024-03-15T10:00:00Z",
         closedate=None,
         renewal_date=renewal_date,
-        notes_last_contacted_date=None,
+        notes_last_contacted=None,
         contact_ids=contact_ids or ["ct-1"],
         company_ids=["co-1"],
         raw={},
