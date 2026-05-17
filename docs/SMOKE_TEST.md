@@ -16,7 +16,39 @@ Before the first send, the architecture's Pre-Launch Checklist Item 2 (sender id
 
 - Daniel's TCIA email connected via OAuth in HubSpot Settings → General → Email → Connected emails (status should read "Connected", not "Connected via IMAP/SMTP")
 - SPF/DKIM/DMARC green for `tcia.com` in HubSpot Settings → Domains & URLs → Email sending domain
-- Get `HUBSPOT_OWNER_ID` — Daniel's HubSpot user ID. Available in Settings → Users & Teams; the URL contains `/userId/{N}/` when viewing his profile.
+
+### 1.5. Find the right Owner ID (NOT User ID)
+
+HubSpot has two distinct numeric IDs per person — `HUBSPOT_OWNER_ID` requires the **Owner ID**, not the User ID. They are different numbers.
+
+Easiest way to find it (no extra scopes needed): pick any deal in HubSpot, then run:
+
+```bash
+curl -s "https://api.hubapi.com/crm/v3/objects/deals/DEAL_ID?properties=hubspot_owner_id" \
+  -H "Authorization: Bearer YOUR_PRIVATE_APP_TOKEN" | jq .properties.hubspot_owner_id
+```
+
+The value returned is your Owner ID (a 9-digit number, distinct from your 8-digit User ID).
+
+### 1.7. Set up the n8n send webhook
+
+HubSpot's `/crm/v3/objects/emails` endpoint **only logs an email engagement** — it doesn't actually deliver to the prospect. To deliver, Module 7 POSTs to an n8n workflow that routes to your connected M365 account.
+
+In n8n:
+1. Create a new workflow named `sdr-send-email`
+2. Add a **Webhook trigger** node:
+   - HTTP Method: `POST`
+   - Path: `sdr-send-email`
+   - Authentication: Header Auth recommended (set a secret token; you'll put the full header value like `Bearer abc123` into `N8N_AUTH_HEADER_VALUE`)
+   - Save + activate, copy the production webhook URL
+3. Add a **Microsoft Outlook** node (operation: Send Email):
+   - To: `={{ $json.body.to }}`
+   - Subject: `={{ $json.body.subject }}`
+   - Body: `={{ $json.body.body }}` (set message type to HTML if you want HTML-rendered)
+   - From: leave default (uses connected M365 account = your TCIA email)
+   - Configure credentials: OAuth-connect Daniel's M365 account (one-time)
+4. Test the workflow manually from n8n's "Execute Workflow" button with a hand-typed payload to your personal email to confirm the connected account works.
+5. Put the webhook URL into `.env`: `N8N_SEND_EMAIL_WEBHOOK_URL=https://n8n.internal/webhook/sdr-send-email`
 
 ### 2. Create a HubSpot test record
 Pick a target where unsolicited TCIA email is fine. Options (low → high realism):
@@ -36,11 +68,13 @@ cp .env.example .env
 ```
 
 Required values for the smoke test:
-- `HUBSPOT_API_KEY` — private app token with the scopes from `docs/ARCHITECTURE.md` Dependencies section
-- `HUBSPOT_OWNER_ID` — Daniel's user ID
+- `HUBSPOT_API_KEY` — private app token (`pat-na1-...`) with the scopes from `docs/ARCHITECTURE.md` Dependencies section
+- `HUBSPOT_OWNER_ID` — Daniel's **Owner** ID (per step 1.5 above — NOT the User ID, the two are different)
+- `N8N_SEND_EMAIL_WEBHOOK_URL` — from step 1.7
+- `N8N_AUTH_HEADER_VALUE` — if your n8n webhook is protected by Header Auth
 - `SQLITE_PATH` — leave default (`~/.sdr-engine/queue.db`)
 
-The LLM endpoint, ZoomInfo, and MS Graph values aren't needed for this smoke test (Module 6's send path doesn't call them).
+The LLM endpoint, ZoomInfo, and MS Graph values aren't needed for this smoke test (Module 6's send path doesn't call them; MS Graph credentials are reused by the n8n Outlook node, not this app).
 
 ## Steps
 

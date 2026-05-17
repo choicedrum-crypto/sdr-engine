@@ -129,6 +129,48 @@ def _retry(operation_name: str, fn) -> tuple[Any, str | None]:
     return None, last_err
 
 
+def send_via_n8n_webhook(
+    webhook_url: str,
+    *,
+    to_email: str,
+    subject: str,
+    body: str,
+    timeout: int = 30,
+    auth_header_value: str | None = None,
+) -> tuple[bool, str | None]:
+    """Trigger actual email delivery via an n8n workflow webhook.
+
+    HubSpot's /crm/v3/objects/emails endpoint LOGS an email engagement but
+    doesn't actually deliver. The architecture's send-flow assumed it did
+    both — smoke test caught the gap on 2026-05-16. To deliver, we POST to
+    an n8n webhook that routes to a Microsoft Outlook (or SMTP) node
+    configured with Daniel's connected M365 account. n8n owns the credential
+    storage per A16; this code only knows the webhook URL.
+
+    Payload shape (kept flat for easy n8n binding via $json.body.X):
+        {"to": "...", "subject": "...", "body": "..."}
+
+    Returns (True, None) on 2xx, (False, "reason") on anything else.
+    Caller treats failure as "email did not go out" — same path as a
+    HubSpot engagement create failure.
+    """
+    headers = {"Content-Type": "application/json"}
+    if auth_header_value:
+        headers["Authorization"] = auth_header_value
+    try:
+        resp = requests.post(
+            webhook_url,
+            json={"to": to_email, "subject": subject, "body": body},
+            headers=headers,
+            timeout=timeout,
+        )
+    except Exception as exc:  # noqa: BLE001 — failure to send must never crash the route
+        return False, f"n8n webhook transport error: {exc}"
+    if 200 <= resp.status_code < 300:
+        return True, None
+    return False, f"n8n webhook returned {resp.status_code}: {resp.text[:200]}"
+
+
 # ─── Orchestrator ──────────────────────────────────────────────────
 def send_artifacts(
     *,
@@ -140,16 +182,26 @@ def send_artifacts(
     deal_id: str,
     company_name: str,
     hubspot: HubSpotClient,
+    contact_email: str = "",  # only used when n8n_send_webhook_url is set
+    n8n_send_webhook_url: str | None = None,
+    n8n_auth_header_value: str | None = None,
     existing_engagement_id: str | None = None,
     existing_note_id: str | None = None,
     existing_task_id: str | None = None,
     phone_task_lead_hours: int = DEFAULT_PHONE_TASK_LEAD_HOURS,
     now_ms: int | None = None,
 ) -> SendResult:
-    """Fire the three HubSpot writes for one queue row.
+    """Fire the email send + three HubSpot writes for one queue row.
 
     `artifacts` is the dict returned by Module 4 (`sdr_engine.llm.draft()`):
     must contain `deal_note` (string) and `call_script` (object).
+
+    `n8n_send_webhook_url` — when provided, POST first to an n8n workflow
+    that actually delivers the email via Daniel's connected M365 account.
+    HubSpot's /crm/v3/objects/emails only logs; it does NOT deliver. If
+    this URL is None, the email is logged in HubSpot but never reaches
+    the prospect (the architecture's original mistaken assumption — kept
+    behind a None default so existing tests + Module 8 sweeps still pass).
 
     `existing_*_id` parameters support idempotent retry from Module 6's
     /retry-note and /retry-task endpoints. Pre-set IDs are NOT re-fired;
@@ -166,7 +218,30 @@ def send_artifacts(
         task_id=existing_task_id,
     )
 
-    # ─── Step 1: email engagement ─────────────────────────────────
+    # ─── Step 0 (NEW): actually deliver via n8n ────────────────────
+    # Skipped when:
+    #   - n8n_send_webhook_url is not configured (legacy behavior — log-only,
+    #     used by Module 8 sweeps where the email already went out)
+    #   - engagement_id is already set (retrying a send_partial row — the
+    #     email was already delivered on the prior attempt)
+    if n8n_send_webhook_url and result.engagement_id is None:
+        if not contact_email:
+            result.errors.append(
+                "n8n send configured but contact_email is empty — refusing to send"
+            )
+            return result
+        ok, err = send_via_n8n_webhook(
+            n8n_send_webhook_url,
+            to_email=contact_email,
+            subject=chosen_subject,
+            body=body,
+            auth_header_value=n8n_auth_header_value,
+        )
+        if not ok:
+            result.errors.append(f"n8n send: {err}")
+            return result  # email never went out — nothing to log
+
+    # ─── Step 1: email engagement (LOG in HubSpot) ─────────────────
     # If we already have an engagement_id, the prospect already received
     # the email on a prior send; we're only here to fill in missing pieces.
     if result.engagement_id is None:
@@ -183,7 +258,13 @@ def send_artifacts(
         )
         if err:
             result.errors.append(err)
-            return result  # nothing went out; nothing to record beyond the error
+            # NOTE: the email already went out via n8n (if configured).
+            # The log failure becomes a send_partial-like state, but with
+            # no engagement_id. Caller treats this as failed for now;
+            # Module 8 doesn't yet sweep for "delivered but not logged".
+            # TODO: track delivered-but-not-logged separately if this
+            # failure mode shows up in practice.
+            return result
         result.engagement_id = engagement_id
 
     # ─── Step 2: deal note ────────────────────────────────────────

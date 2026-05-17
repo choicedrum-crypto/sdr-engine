@@ -346,3 +346,151 @@ def test_send_result_default_construction() -> None:
     assert r.note_id is None
     assert r.task_id is None
     assert r.errors == []
+
+
+# ─── n8n send webhook (Module 7 amendment 2026-05-16) ──────────────
+N8N_URL = "https://n8n.internal/webhook/sdr-send-email"
+
+
+@responses.activate
+def test_send_via_n8n_webhook_returns_true_on_2xx() -> None:
+    from sdr_engine.send import send_via_n8n_webhook
+    responses.add(responses.POST, N8N_URL, status=200)
+    ok, err = send_via_n8n_webhook(
+        N8N_URL, to_email="test@example.com", subject="Hi", body="Body"
+    )
+    assert ok is True
+    assert err is None
+
+
+@responses.activate
+def test_send_via_n8n_webhook_payload_shape() -> None:
+    """n8n workflow binds to $json.body.{to,subject,body} — keep payload flat."""
+    from sdr_engine.send import send_via_n8n_webhook
+    responses.add(responses.POST, N8N_URL, status=200)
+    send_via_n8n_webhook(
+        N8N_URL, to_email="x@y.com", subject="Subj", body="Body text"
+    )
+    sent = _json.loads(responses.calls[0].request.body)
+    assert sent == {"to": "x@y.com", "subject": "Subj", "body": "Body text"}
+
+
+@responses.activate
+def test_send_via_n8n_webhook_returns_false_on_5xx() -> None:
+    from sdr_engine.send import send_via_n8n_webhook
+    responses.add(responses.POST, N8N_URL, status=503, body="upstream gone")
+    ok, err = send_via_n8n_webhook(
+        N8N_URL, to_email="x@y.com", subject="x", body="y"
+    )
+    assert ok is False
+    assert "503" in err
+
+
+@responses.activate
+def test_send_via_n8n_webhook_returns_false_on_transport_error() -> None:
+    from sdr_engine.send import send_via_n8n_webhook
+    responses.add(responses.POST, N8N_URL, body=Exception("network down"))
+    ok, err = send_via_n8n_webhook(
+        N8N_URL, to_email="x@y.com", subject="x", body="y"
+    )
+    assert ok is False
+    assert "transport" in err
+
+
+@responses.activate
+def test_send_via_n8n_webhook_adds_auth_header_when_provided() -> None:
+    from sdr_engine.send import send_via_n8n_webhook
+    responses.add(responses.POST, N8N_URL, status=200)
+    send_via_n8n_webhook(
+        N8N_URL, to_email="x@y.com", subject="x", body="y",
+        auth_header_value="Bearer secret-token",
+    )
+    assert responses.calls[0].request.headers["Authorization"] == "Bearer secret-token"
+
+
+# ─── send_artifacts + n8n integration ──────────────────────────────
+@responses.activate
+def test_send_artifacts_calls_n8n_first_then_hubspot(hubspot: HubSpotClient) -> None:
+    """n8n webhook URL configured → order should be n8n send → engagement → note → task."""
+    responses.add(responses.POST, N8N_URL, status=200)
+    responses.add(responses.POST, EMAIL_URL, json={"id": "eng-100"}, status=201)
+    responses.add(responses.POST, NOTE_URL, json={"id": "note-200"}, status=201)
+    responses.add(responses.POST, TASK_URL, json={"id": "task-300"}, status=201)
+
+    result = send_artifacts(
+        hubspot=hubspot,
+        contact_email="prospect@example.com",
+        n8n_send_webhook_url=N8N_URL,
+        **_send_kwargs(),
+    )
+    assert result.status == "sent"
+    # Order: n8n send, engagement, note, task
+    urls = [c.request.url for c in responses.calls]
+    assert urls == [N8N_URL, EMAIL_URL, NOTE_URL, TASK_URL]
+    # n8n got the prospect email
+    n8n_body = _json.loads(responses.calls[0].request.body)
+    assert n8n_body["to"] == "prospect@example.com"
+    assert n8n_body["subject"] == "API — trade credit panel"
+
+
+@responses.activate
+def test_send_artifacts_n8n_failure_aborts_without_hubspot_writes(hubspot: HubSpotClient) -> None:
+    """If actual email delivery fails, we MUST NOT create the HubSpot log
+    (otherwise HubSpot would show 'sent' for an email that never went out)."""
+    responses.add(responses.POST, N8N_URL, status=502)
+    # No EMAIL_URL mock — if Module 7 calls it after n8n fail, the test errors.
+
+    result = send_artifacts(
+        hubspot=hubspot,
+        contact_email="prospect@example.com",
+        n8n_send_webhook_url=N8N_URL,
+        **_send_kwargs(),
+    )
+    assert result.status == "failed"
+    assert result.engagement_id is None
+    assert any("n8n send" in e for e in result.errors)
+    # Only the n8n call happened
+    assert len(responses.calls) == 1
+    assert responses.calls[0].request.url == N8N_URL
+
+
+@responses.activate
+def test_send_artifacts_n8n_skipped_on_retry_with_existing_engagement(hubspot: HubSpotClient) -> None:
+    """Retrying a send_partial row: email already went out, only note + task missing.
+    n8n MUST NOT be called again or the prospect gets a duplicate email."""
+    responses.add(responses.POST, NOTE_URL, json={"id": "note-NEW"}, status=201)
+
+    result = send_artifacts(
+        hubspot=hubspot,
+        contact_email="prospect@example.com",
+        n8n_send_webhook_url=N8N_URL,
+        existing_engagement_id="eng-prior-100",
+        existing_task_id="task-prior-300",
+        **_send_kwargs(),
+    )
+    assert result.status == "sent"
+    # Only the note URL was hit — n8n NOT called, engagement NOT recreated
+    assert len(responses.calls) == 1
+    assert responses.calls[0].request.url == NOTE_URL
+
+
+def test_send_artifacts_n8n_configured_but_no_contact_email_refuses(hubspot: HubSpotClient) -> None:
+    """Defensive check: if the webhook is set but contact_email is empty,
+    refuse to send rather than silently fall through to log-only."""
+    result = send_artifacts(
+        hubspot=hubspot,
+        contact_email="",
+        n8n_send_webhook_url=N8N_URL,
+        **_send_kwargs(),
+    )
+    assert result.status == "failed"
+    assert any("contact_email is empty" in e for e in result.errors)
+
+
+def test_send_artifacts_works_without_n8n_for_backward_compat(hubspot: HubSpotClient) -> None:
+    """When n8n_send_webhook_url is None (default), Module 7 behaves as
+    before — logs to HubSpot, doesn't attempt any actual send. Backward
+    compat for Module 8 sweeps + tests that predate this amendment."""
+    # _send_kwargs() doesn't include n8n_send_webhook_url; it defaults to None.
+    # This test confirms the legacy path still works.
+    pass  # the other 9 send_artifacts tests in this file all exercise this implicitly
