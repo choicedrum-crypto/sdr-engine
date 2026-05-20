@@ -1,0 +1,22 @@
+[project]
+name = "tcia-core"
+version = "0.0.1"
+description = "Shared primitives for apps/sdr-engine and apps/tcia-leadgen"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+# Placeholder package. Primitives are extracted in follow-up PRs as each
+# need lands in one of the two apps. See docs/leadgen-vision.md week-1
+# step #1 for the planned content list.
+[tool.setuptools.packages.find]
+include = ["tcia_core*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
