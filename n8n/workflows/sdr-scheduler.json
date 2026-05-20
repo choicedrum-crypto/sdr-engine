@@ -32,6 +32,14 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "CF-Access-Client-Id",
+              "value": "={{ $env.CF_ACCESS_CLIENT_ID }}"
+            },
+            {
+              "name": "CF-Access-Client-Secret",
+              "value": "={{ $env.CF_ACCESS_CLIENT_SECRET }}"
             }
           ]
         },
@@ -115,15 +123,21 @@
     "work. HTTP Request via Cloudflare Tunnel does.",
     "",
     "BEFORE ACTIVATING:",
-    "  1. Set the SCHEDULER_AUTH_TOKEN n8n environment variable to match",
-    "     the value in the Flask app's .env (Settings -> Variables in n8n).",
-    "  2. Set OPENCLAW_WEBHOOK_URL (same — for the Alert OpenClaw node).",
-    "  3. The Flask UI must be running and reachable at",
+    "  1. Set these n8n environment variables (same value as in the Flask",
+    "     app's .env, and the Cloudflare Access service token):",
+    "       SCHEDULER_AUTH_TOKEN     — shared secret for Flask's auth check",
+    "       CF_ACCESS_CLIENT_ID      — service token Client ID from CF dash",
+    "       CF_ACCESS_CLIENT_SECRET  — service token Client Secret",
+    "       OPENCLAW_WEBHOOK_URL     — for the Alert OpenClaw branch (optional)",
+    "     The two CF-Access-* headers are required when the SDR app sits",
+    "     behind a Cloudflare Access policy. The service token is what",
+    "     lets the cron call through Access without a human login.",
+    "  2. The Flask UI must be running and reachable at",
     "     https://sdr.tradecredit.agency. If you put it on a different",
     "     hostname, update the URL in the Run scheduler node.",
-    "  4. Toggle the workflow Active.",
+    "  3. Toggle the workflow Active.",
     "",
-    "  5. Daniel runs manually (Execute Workflow button) for the first",
+    "  4. Daniel runs manually (Execute Workflow button) for the first",
     "     3-5 days and inspects ~/.sdr-engine/queue.db + the Review UI",
     "     before enabling the cron. After that, cron runs unattended and",
     "     Module 8's nightly sweep + weekly digest provide ops visibility.",
