@@ -138,10 +138,18 @@ curl https://sdr.tradecredit.agency/health
 
 Delete the old broken one if present, then import `n8n/workflows/sdr-scheduler.json` (the v0.0.8.2 version with HTTP Request node).
 
-n8n needs `SCHEDULER_AUTH_TOKEN` set to the SAME value as `.env`. How depends on your install:
+n8n needs four env vars set on its container (or in Settings → Variables on Cloud/desktop). Same values must be available on both sides where applicable:
 
-- **n8n Cloud / desktop**: Settings → Variables → add `SCHEDULER_AUTH_TOKEN`
-- **Self-hosted Docker (most likely here)**: variables come from the container's environment. Add `SCHEDULER_AUTH_TOKEN=...` to the n8n service's env (docker-compose `environment:` block, `.env` file referenced by the compose, or `docker run -e`), then restart the container. Same for `OPENCLAW_WEBHOOK_URL` if you use the Alert OpenClaw branch.
+| Var | Source | Why |
+|-----|--------|-----|
+| `SCHEDULER_AUTH_TOKEN` | Same value as Flask's `.env` | Shared secret for Flask's `/scheduler/run` auth check |
+| `CF_ACCESS_CLIENT_ID` | Cloudflare → Zero Trust → Access → Service Auth → token Client ID | Lets the cron call through Cloudflare Access without a human login |
+| `CF_ACCESS_CLIENT_SECRET` | Same token's Client Secret (only shown once at creation) | Same — pairs with the Client ID |
+| `OPENCLAW_WEBHOOK_URL` | Your OpenClaw webhook URL, or leave unset | Powers the "Alert OpenClaw" branch on failed runs (optional) |
+
+**Self-hosted Docker** (most likely): add these to the n8n service's env (docker-compose `environment:` block, env_file, or `docker run -e`), then restart the container so n8n picks them up. Re-importing the workflow won't re-read env vars — only a restart does.
+
+**Cloudflare Access service-token reminder**: in Cloudflare → Zero Trust → Access → Applications → SDR Engine → Policies, the service token must be added to an Include rule (e.g. an "Allow" policy with rule: Service Auth → `n8n-scheduler`). Without that, Cloudflare doesn't recognize the token even if the headers are correct.
 
 ### Step 7: Manual test from n8n
 
