@@ -1003,7 +1003,7 @@ Status: spike plans written and committed; execution still pending where runtime
 |---|---|---|---|
 | PB1 — Hermes spike | **PLAN COMPLETE** — execution pending | [PB1-hermes-spike.md](PB1-hermes-spike.md) | Linux box with Hermes + OpenClaw installed; ½ day |
 | PB2 — Codex cost spike | **PLAN COMPLETE** — execution pending | [PB2-codex-cost-spike.md](PB2-codex-cost-spike.md) | Codex CLI on PATH + 20 fixture BK prospects + Codex billing access; ½ day |
-| PB3 — Monorepo continuity sequence | **PLAN COMPLETE** — execution pending | [PB3-monorepo-continuity.md](PB3-monorepo-continuity.md) | Box access for parallel cloudflared + systemd edits; ~10 hrs across 2–3 calendar days |
+| PB3 — Monorepo continuity sequence | **Phase 1 DONE** (branch `monorepo-spike` @ `074ebfa`, 244 tests + ruff green); Phases 2–4 pending on-box | [PB3-monorepo-continuity.md](PB3-monorepo-continuity.md) | Box access for parallel cloudflared + systemd edits; ~10 hrs across 2–3 calendar days |
 
 After PB1–PB3 execute successfully, the plan is code-ready and `/ship` creates the first PR (monorepo conversion + `apps/tcia-leadgen/` scaffold).
 

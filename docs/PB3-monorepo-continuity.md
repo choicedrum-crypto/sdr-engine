@@ -108,10 +108,12 @@ touch packages/tcia-core/tcia_core/__init__.py
 **Phase 1 acceptance:**
 ```bash
 cd apps/sdr-engine && pip install -e ".[dev]" && pytest -v
-# All 22 tests pass identically to pre-migration baseline
+# All 244 tests pass identically to pre-migration baseline (22 test files × ~11 tests avg)
 ```
 
 If any test fails, stop here. Investigate before going further. **Do not proceed to Phase 2 until Phase 1 acceptance is green.**
+
+**Status (2026-05-20): Phase 1 EXECUTED on branch `monorepo-spike` at commit `074ebfa`.** Result: 244 tests pass + ruff lint clean. No application code modified — pure structural move. Branch ready for Phase 2 on the Linux box.
 
 ### Phase 2 — Parallel deploy on sibling subdomain (Day 1 PM – Day 2 AM)
 
