@@ -115,6 +115,8 @@ If any test fails, stop here. Investigate before going further. **Do not proceed
 
 **Status (2026-05-20): Phase 1 EXECUTED on branch `monorepo-spike` at commit `074ebfa`.** Result: 244 tests pass + ruff lint clean. No application code modified — pure structural move. Branch ready for Phase 2 on the Linux box.
 
+**Re-verified on dbhub (2026-05-20):** `pip install -e ".[dev]" && pytest -v` in the cloned monorepo layout under Python 3.12.3 → **244 passed**, ruff check clean. Identical to the pre-migration baseline.
+
 ### Phase 2 — Parallel deploy on sibling subdomain (Day 1 PM – Day 2 AM)
 
 Goal: prove the new layout runs in production-shape on a sibling URL, with zero risk to the live one.
@@ -176,6 +178,8 @@ curl -X POST https://sdr-monorepo.tradecredit.agency/scheduler/run \
 ```
 
 If sibling works, Phase 2 is done. **Live traffic is still on the old layout — no risk.**
+
+**Status (2026-05-20): Phase 2 EXECUTED on dbhub in localhost-only mode** (sibling tunnel + Cloudflare Access skipped — `/health` parity + `/scheduler/run` 401 gate verified locally instead). Clone path: `/home/admin1/tcia/sdr-engine-monorepo` (NOT `/opt/tcia-monorepo` — live deploy was discovered to be `/home/admin1/tcia/sdr-engine` rather than `/opt/sdr-engine`). Sibling gunicorn on `127.0.0.1:5680` returned byte-identical `/health` JSON to the live `:5679` (shared `~/.sdr-engine/queue.db` confirmed by matching `last_run` timestamp). `/scheduler/run` without auth returned `{"error":"unauthorized"}` HTTP 401. Sibling cleanly stopped before Phase 3.
 
 ### Phase 3 — Cutover (Day 2 PM, 30-minute window)
 
@@ -244,7 +248,11 @@ sudo systemctl restart cloudflared
 # Now back on old layout. Investigate.
 ```
 
+**Status (2026-05-21T02:00:53Z): Phase 3 EXECUTED on dbhub.** Cutover via [`apps/sdr-engine/scripts/systemd/pb3-cutover.sh`](../scripts/systemd/pb3-cutover.sh) on the `monorepo-spike` clone. Observed downtime: **<1 second** (SIGTERM to old master pid 12024 and new master pid 12250 boot occurred in the same `gunicorn.log` second). No cloudflared edit needed (port stayed `5679`, tunnel UUID `637a3c18-d1f8-4ed6-b0dc-bd9f5598d6f3` untouched); no crontab edit needed (no admin1 crontab exists). Post-cutover acceptance: local `/health` 200 with identical JSON shape, tunnel `https://sdr.tradecredit.agency/health` HTTP 302 (unchanged CF Access redirect behavior), 2-minute log tail clean, `systemctl is-active sdr-engine.service` = `active`. Backup unit file at `/etc/systemd/system/sdr-engine.service.bak.pb3-20260521T020052Z`; rollback via [`apps/sdr-engine/scripts/systemd/pb3-rollback.sh`](../scripts/systemd/pb3-rollback.sh) (verified script logic, not actually rolled back).
+
 ### Phase 4 — Decom old layout (Day 3, can wait 1–2 weeks)
+
+**Status (2026-05-20): DEFERRED.** Per the contract above, Phase 4 must wait for at least one clean weekly cron cycle in the new layout. Earliest execution: ~2026-05-27. Until then, `/home/admin1/tcia/sdr-engine/` remains on disk (now dormant) as the implicit rollback target.
 
 Only do this after the new layout has run a full weekly cron cycle successfully.
 
