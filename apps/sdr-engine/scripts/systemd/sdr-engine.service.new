@@ -1,0 +1,19 @@
+[Unit]
+Description=SDR Engine Flask UI (gunicorn) [monorepo layout]
+Documentation=https://github.com/choicedrum-crypto/sdr-engine
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin1
+Group=admin1
+WorkingDirectory=/home/admin1/tcia/sdr-engine-monorepo/apps/sdr-engine
+ExecStart=/home/admin1/tcia/sdr-engine-monorepo/apps/sdr-engine/.venv/bin/gunicorn -w 2 -b 127.0.0.1:5679 -t 300 ui.server:create_app()
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:/home/admin1/tcia/sdr-engine-monorepo/apps/sdr-engine/gunicorn.log
+StandardError=append:/home/admin1/tcia/sdr-engine-monorepo/apps/sdr-engine/gunicorn.log
+
+[Install]
+WantedBy=multi-user.target
