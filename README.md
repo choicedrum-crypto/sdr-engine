@@ -4,11 +4,11 @@ Internal SDR reactivation engine for TCIA (trade credit + AR protection brokerag
 
 Surfaces re-engageable prospects from HubSpot's "Prospecting" pipeline at the right moment (60 days before renewal when known; round-robin year-long fallback otherwise), drafts three artifacts per send (deal note + email + cold-call script) via local LLM, and auto-creates a paired phone-call task in HubSpot.
 
-**Status**: pre-build. Architecture locked, scaffolding in progress.
+**Status**: production stabilization. Core modules are scaffolded; current work is hardening the split-host deployment before unattended cron is enabled.
 
 ## Spec
 
-See `docs/ARCHITECTURE.md` for the v1 spec, including all modules, schema, env vars, and pre-launch checklist. The spec went through `/autoplan` review on 2026-05-14 and has 16 mechanical amendments + locked taste decisions baked in.
+See `docs/ARCHITECTURE.md` for the v1 spec, including all modules, schema, env vars, and pre-launch checklist. See `docs/PRODUCTION.md` for the current Hostinger n8n + dbhub production runbook. The spec went through `/autoplan` review on 2026-05-14 and has 16 mechanical amendments + locked taste decisions baked in.
 
 ## Quick start (for the maintainer)
 
@@ -30,7 +30,7 @@ See `docs/ARCHITECTURE.md` for the v1 spec, including all modules, schema, env v
 
 4. **Run tests**: `pytest`
 
-5. **Run the Review UI** (when implemented): `python ui/server.py` — accessible at `http://127.0.0.1:5679` locally or via Cloudflare Tunnel at `https://sdr.tradecredit.agency`.
+5. **Run the Review UI**: `python ui/server.py` - accessible at `http://127.0.0.1:5679/queue` locally or via Cloudflare Tunnel at `https://sdr.tradecredit.agency` (root redirects to `/queue`).
 
 ## Architecture at a glance
 
@@ -38,7 +38,7 @@ See `docs/ARCHITECTURE.md` for the v1 spec, including all modules, schema, env v
 HubSpot Prospecting pipeline (245 deals across 7 funnel types)
        │
        ▼
-[Module 1] n8n cron daily 06:00 → filter + classify + dedupe + bucket
+[Module 1] Hostinger n8n cron daily 06:00 -> Cloudflare -> dbhub Flask `/scheduler/run`
        │
        ▼
 [Module 2] Apollo search (URL verification, no enrich credit burn)
@@ -75,6 +75,13 @@ HubSpot Prospecting pipeline (245 deals across 7 funnel types)
 - **Remote access**: Cloudflare Tunnel + Access at `sdr.tradecredit.agency`
 - **Monitoring**: OpenClaw
 - **Tests**: pytest
+
+## Production topology
+
+- **Hostinger VPS**: runs n8n workflows only.
+- **dbhub local server**: runs Flask Review UI, scheduler scripts, SQLite queue DB, LiteLLM/Ollama, and Cloudflare Tunnel.
+- **Cloudflare**: routes `https://sdr.tradecredit.agency` to dbhub. Human UI paths are protected by Cloudflare Access; scheduler machine paths (`/scheduler/ready`, `/scheduler/run`) bypass Access and require the Flask Bearer token from Hostinger n8n.
+- **Important URLs**: `/` redirects to `/queue`; `/queue` is Daniel's review UI; `/health` is human post-login health; `/scheduler/ready` is read-only n8n preflight; `/scheduler/run` is the side-effectful scheduler trigger.
 
 ## Status of pre-launch checks
 

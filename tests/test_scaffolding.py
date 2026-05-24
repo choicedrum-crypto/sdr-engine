@@ -89,3 +89,30 @@ def test_env_example_lists_all_required_keys() -> None:
     ]
     for key in required:
         assert f"{key}=" in env_text, f".env.example is missing {key}"
+
+
+def test_scheduler_workflow_preflights_with_correct_bearer_expression() -> None:
+    """Hostinger n8n must prove auth/reachability before the side-effectful scheduler POST."""
+    payload = json.loads(
+        (ROOT / "n8n" / "workflows" / "sdr-scheduler.json").read_text(encoding="utf-8")
+    )
+    nodes = {node["name"]: node for node in payload["nodes"]}
+    expected_auth = '={{ "Bearer " + $env.SCHEDULER_AUTH_TOKEN }}'
+
+    assert payload.get("active") is False
+    assert nodes["Scheduler preflight"]["parameters"]["method"] == "GET"
+    assert nodes["Scheduler preflight"]["parameters"]["url"].endswith("/scheduler/ready")
+    assert nodes["Run scheduler"]["parameters"]["method"] == "POST"
+    assert nodes["Run scheduler"]["parameters"]["url"].endswith("/scheduler/run")
+
+    for node_name in ("Scheduler preflight", "Run scheduler"):
+        headers = {
+            h["name"]: h["value"]
+            for h in nodes[node_name]["parameters"]["headerParameters"]["parameters"]
+        }
+        assert headers["Authorization"] == expected_auth
+
+    trigger_next = payload["connections"]["Daily 06:00 weekdays"]["main"][0][0]["node"]
+    preflight_next = payload["connections"]["Scheduler preflight"]["main"][0][0]["node"]
+    assert trigger_next == "Scheduler preflight"
+    assert preflight_next == "Run scheduler"

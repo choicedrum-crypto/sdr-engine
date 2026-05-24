@@ -107,6 +107,49 @@ def test_scheduler_route_rejects_token_without_bearer_prefix(app_with_auth) -> N
 
 
 # ─── Returned shape ────────────────────────────────────────────────
+def test_scheduler_ready_rejects_missing_auth_when_configured(app_with_auth) -> None:
+    client = app_with_auth.test_client()
+    resp = client.get("/scheduler/ready")
+    assert resp.status_code == 401
+    assert resp.get_json()["error"] == "unauthorized"
+
+
+def test_scheduler_ready_accepts_matching_token(app_with_auth) -> None:
+    client = app_with_auth.test_client()
+    resp = client.get(
+        "/scheduler/ready",
+        headers={"Authorization": "Bearer secret-token-123"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["checks"]["scheduler_auth"] == "ok"
+    assert body["checks"]["sqlite"] == "ok"
+    assert body["checks"]["repo_root"] == "ok"
+
+
+def test_scheduler_ready_does_not_modify_queue_or_runs(app_with_auth, tmp_queue_db) -> None:
+    conn = sqlite3.connect(tmp_queue_db)
+    before = {
+        "queue": conn.execute("SELECT COUNT(*) FROM queue").fetchone()[0],
+        "runs": conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0],
+    }
+    conn.close()
+
+    resp = app_with_auth.test_client().get(
+        "/scheduler/ready",
+        headers={"Authorization": "Bearer secret-token-123"},
+    )
+    assert resp.status_code == 200
+
+    conn = sqlite3.connect(tmp_queue_db)
+    after = {
+        "queue": conn.execute("SELECT COUNT(*) FROM queue").fetchone()[0],
+        "runs": conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0],
+    }
+    conn.close()
+    assert after == before
+
+
 def test_scheduler_route_returns_full_result_dict(app_no_auth) -> None:
     client = app_no_auth.test_client()
     with responses.RequestsMock() as rsps:

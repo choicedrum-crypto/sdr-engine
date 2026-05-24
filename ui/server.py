@@ -9,13 +9,16 @@ https://sdr.tradecredit.agency — Cloudflare Access handles auth at the
 edge; this server doesn't need its own login flow.
 
 Routes:
-  GET  /queue                    — next card (state-aware render)
-  POST /queue/<id>/send          — call Module 7; auto-detect dirty edit
-  POST /queue/<id>/skip          — 30-day cooldown
-  POST /queue/<id>/retry-note    — fill missing note on send_partial row
-  POST /queue/<id>/retry-task    — fill missing task on send_partial row
-  POST /queue/force              — 501 until Modules 1 + 3 land
-  GET  /health                   — JSON: LLM/HubSpot/SQLite/last_run
+  GET  /                         - redirect to /queue
+  GET  /queue                    - next card (state-aware render)
+  POST /queue/<id>/send          - call Module 7; auto-detect dirty edit
+  POST /queue/<id>/skip          - 30-day cooldown
+  POST /queue/<id>/retry-note    - fill missing note on send_partial row
+  POST /queue/<id>/retry-task    - fill missing task on send_partial row
+  POST /queue/force              - 501 until Modules 1 + 3 land
+  GET  /scheduler/ready          - n8n preflight; auth + local readiness only
+  POST /scheduler/run            - n8n scheduler trigger
+  GET  /health                   - JSON: LLM/HubSpot/SQLite/last_run
 
 Configurable via the function `create_app()` so tests can pass an
 isolated SQLite path. Production entry point reads env vars and starts
@@ -126,7 +129,22 @@ def create_app(
             base_url=app.config["HUBSPOT_BASE_URL"],
         )
 
-    # ─── GET /queue — state-aware card render ─────────────────────
+    # Shared scheduler endpoint auth helper.
+    def _scheduler_auth_error():
+        """Return a 401 response when scheduler Bearer auth fails, else None."""
+        required = app.config["SCHEDULER_AUTH_TOKEN"]
+        if not required:
+            return None
+        provided = request.headers.get("Authorization", "")
+        expected = f"Bearer {required}"
+        if provided != expected:
+            return jsonify({"error": "unauthorized"}), 401
+        return None
+
+    @app.get("/")
+    def root_redirect():
+        return redirect(url_for("queue_view"))
+
     @app.get("/queue")
     def queue_view():
         db = _get_db()
@@ -308,7 +326,30 @@ def create_app(
             "needs_modules": result.needs,
         }), 501
 
-    # ─── POST /scheduler/run — invoke Module 1 from n8n cron ──────
+    # Safe preflight for Hostinger n8n.
+    @app.get("/scheduler/ready")
+    def scheduler_ready():
+        """Safe preflight for Hostinger n8n; no HubSpot, LLM, or queue writes."""
+        auth_error = _scheduler_auth_error()
+        if auth_error is not None:
+            return auth_error
+
+        repo_root = Path(app.config["REPO_ROOT"])
+        checks = {
+            "app": "ok",
+            "scheduler_auth": "ok",
+            "sqlite": _probe_sqlite(app.config["SQLITE_PATH"]),
+            "repo_root": "ok" if repo_root.exists() else "missing",
+            "prompt_file": "ok" if (repo_root / "prompts" / "draft-pipeline.txt").exists()
+            else "missing",
+            "ctas_file": "ok" if (repo_root / "prompts" / "ctas.json").exists() else "missing",
+        }
+        overall = "ok" if all(value == "ok" for value in checks.values()) else "degraded"
+        return jsonify({
+            "overall": overall,
+            "checks": checks,
+        })
+
     @app.post("/scheduler/run")
     def scheduler_run():
         """Run the Module 1 scheduler synchronously and return the result
@@ -332,13 +373,9 @@ def create_app(
         long scheduler runs block other UI requests. Production should
         use gunicorn with multiple workers.
         """
-        # Auth check (only when token is configured)
-        required = app.config["SCHEDULER_AUTH_TOKEN"]
-        if required:
-            provided = request.headers.get("Authorization", "")
-            expected = f"Bearer {required}"
-            if provided != expected:
-                return jsonify({"error": "unauthorized"}), 401
+        auth_error = _scheduler_auth_error()
+        if auth_error is not None:
+            return auth_error
 
         if not app.config["HUBSPOT_API_KEY"]:
             return jsonify({"error": "HUBSPOT_API_KEY not configured"}), 500
