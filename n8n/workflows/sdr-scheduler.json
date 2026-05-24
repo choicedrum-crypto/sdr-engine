@@ -16,7 +16,45 @@
       "name": "Daily 06:00 weekdays",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [200, 300]
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://sdr.tradecredit.agency/scheduler/ready",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SCHEDULER_AUTH_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "2a2b3c4d-0000-1111-2222-333344445555",
+      "name": "Scheduler preflight",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        450,
+        300
+      ]
     },
     {
       "parameters": {
@@ -27,7 +65,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer ={{ $env.SCHEDULER_AUTH_TOKEN }}"
+              "value": "={{ \"Bearer \" + $env.SCHEDULER_AUTH_TOKEN }}"
             },
             {
               "name": "Content-Type",
@@ -38,24 +76,40 @@
         "sendBody": false,
         "options": {
           "timeout": 300000,
-          "response": {"response": {"neverError": true, "responseFormat": "json"}}
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
         }
       },
       "id": "2a2b3c4d-aaaa-bbbb-cccc-ddddeeeeffff",
       "name": "Run scheduler",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [500, 300]
+      "position": [
+        700,
+        300
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": {"caseSensitive": false, "leftValue": "", "typeValidation": "loose"},
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
           "conditions": [
             {
               "leftValue": "={{ $json.errors }}",
               "rightValue": 0,
-              "operator": {"type": "array", "operation": "lengthGt", "rightType": "number"}
+              "operator": {
+                "type": "array",
+                "operation": "lengthGt",
+                "rightType": "number"
+              }
             }
           ]
         }
@@ -64,7 +118,10 @@
       "name": "Did it fail?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [800, 300]
+      "position": [
+        1000,
+        300
+      ]
     },
     {
       "parameters": {
@@ -72,7 +129,12 @@
         "url": "={{ $env.OPENCLAW_WEBHOOK_URL }}",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{"name": "Content-Type", "value": "application/json"}]
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
         },
         "sendBody": true,
         "specifyBody": "json",
@@ -83,16 +145,58 @@
       "name": "Alert OpenClaw",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1100, 200]
+      "position": [
+        1300,
+        200
+      ]
     }
   ],
   "connections": {
-    "Daily 06:00 weekdays": {"main": [[{"node": "Run scheduler", "type": "main", "index": 0}]]},
-    "Run scheduler":       {"main": [[{"node": "Did it fail?", "type": "main", "index": 0}]]},
-    "Did it fail?":        {"main": [
-      [{"node": "Alert OpenClaw", "type": "main", "index": 0}],
-      []
-    ]}
+    "Daily 06:00 weekdays": {
+      "main": [
+        [
+          {
+            "node": "Scheduler preflight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scheduler preflight": {
+      "main": [
+        [
+          {
+            "node": "Run scheduler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run scheduler": {
+      "main": [
+        [
+          {
+            "node": "Did it fail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Did it fail?": {
+      "main": [
+        [
+          {
+            "node": "Alert OpenClaw",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
   },
   "settings": {
     "executionOrder": "v1",
@@ -102,7 +206,9 @@
     "saveDataSuccessExecution": "all",
     "timezone": "America/Chicago"
   },
-  "tags": ["sdr-engine"],
+  "tags": [
+    "sdr-engine"
+  ],
   "_README": [
     "Daily scheduler for the SDR engine — cross-host version.",
     "Cron fires Mon-Fri at 06:00 local. POSTs to the Flask UI's",
@@ -115,6 +221,8 @@
     "work. HTTP Request via Cloudflare Tunnel does.",
     "",
     "BEFORE ACTIVATING:",
+    "  0. Import inactive. Manually run Scheduler preflight first; it must",
+    "     return HTTP 200 before allowing the side-effectful scheduler POST.",
     "  1. Set the SCHEDULER_AUTH_TOKEN n8n environment variable to match",
     "     the value in the Flask app's .env (Settings -> Variables in n8n).",
     "  2. Set OPENCLAW_WEBHOOK_URL (same — for the Alert OpenClaw node).",
@@ -132,5 +240,6 @@
     "speed. n8n HTTP Request timeout is 300s (5 min) to cover comfortably.",
     "neverError=true means n8n doesn't throw on non-2xx; the IF-node",
     "branches on the response body's errors array instead."
-  ]
+  ],
+  "active": false
 }

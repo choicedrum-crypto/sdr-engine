@@ -88,6 +88,12 @@ def _insert_pending_card(
 
 
 # ─── GET /queue: empty / caught_up ─────────────────────────────────
+def test_root_redirects_to_queue(client) -> None:
+    resp = client.get("/")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/queue")
+
+
 def test_queue_empty_renders_caught_up(client) -> None:
     resp = client.get("/queue")
     assert resp.status_code == 200
